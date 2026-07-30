@@ -1,0 +1,48 @@
+{
+  "$schema": "./node_modules/@angular/cli/lib/config/schema.json",
+  "version": 1,
+  "cli": {
+    "packageManager": "pnpm",
+    "schematicCollections": ["angular-eslint"]
+  },
+  "newProjectRoot": "projects",
+  "projects": {
+    "qits-spa-ui-components": {
+      "projectType": "library",
+      "root": "projects/qits-spa-ui-components",
+      "sourceRoot": "projects/qits-spa-ui-components/src",
+      "prefix": "qits",
+      "architect": {
+        "build": {
+          "builder": "@angular/build:ng-packagr",
+          "configurations": {
+            "production": {
+              "tsConfig": "projects/qits-spa-ui-components/tsconfig.lib.prod.json"
+            },
+            "development": {
+              "tsConfig": "projects/qits-spa-ui-components/tsconfig.lib.json"
+            }
+          },
+          "defaultConfiguration": "production"
+        },
+        "test": {
+          "builder": "@angular/build:unit-test",
+          "options": {
+            "tsConfig": "projects/qits-spa-ui-components/tsconfig.spec.json",
+            "exclude": ["projects/qits-spa-ui-components/src/**/*.browser.spec.ts"]
+          }
+        },
+        "lint": {
+          "builder": "@angular-eslint/builder:lint",
+          "options": {
+            "lintFilePatterns": [
+              "projects/qits-spa-ui-components/**/*.ts",
+              "projects/qits-spa-ui-components/**/*.html"
+            ],
+            "eslintConfig": "projects/qits-spa-ui-components/eslint.config.js"
+          }
+        }
+      }
+    }
+  }
+}
