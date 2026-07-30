@@ -24,7 +24,9 @@ steps:
   - image: qits/build-images/node-base:latest
     timeout-seconds: 1800
     script: |
-      set -e
+      # -u is load-bearing: with the registry vars unset, an unset-tolerant script writes a
+      # registry-less .npmrc and the publish below goes to npmjs.org instead of failing here.
+      set -eu
 
       cat > ~/.npmrc <<EOF
       registry=${QITS_NPM_PROXY_URL}
