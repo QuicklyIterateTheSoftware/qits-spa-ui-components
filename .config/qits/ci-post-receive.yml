@@ -1,0 +1,46 @@
+# The pipeline qits-ci runs on every push to a tracked branch of this repository.
+#
+# One step, and no `docker: true` anywhere in it: publishing an npm package needs nothing but HTTP
+# from this container to qits-artifacts on qits-net, so this step keeps the ordinary sandbox that
+# an image-publishing step has to give up.
+#
+# The two registry URLs arrive as environment — QITS_NPM_PROXY_URL (the pull-through cache of
+# npmjs) and QITS_NPM_REGISTRY_URL (the hosted repository we publish into) — so no deployment fact
+# is written down here. The `${QITS_NPM_REGISTRY_URL#http:}` strip turns the URL into the
+# `//host/path/` form npm keys credentials by; the token it keys is ceremony for the npm CLI's own
+# pre-flight, which refuses to publish when no credential is configured. The server reads nothing,
+# and the line goes away the day npm accepts an anonymous publish.
+#
+# Versioning is publish-if-absent: the version in projects/qits-spa-ui-components/package.json is
+# the release gate. A re-run, a README push or any commit that does not bump it finds the version
+# already in the registry and succeeds without touching it; versions are immutable, so this never
+# fights the registry. Bump the version to release.
+#
+# The test step runs the jsdom target (`pnpm test`), never vitest browser mode: this image has no
+# chromium and CI is not the place to download one. A component that genuinely needs a layout
+# engine gets a `.browser.spec.ts` and a `test-browser` target, run locally until a build image
+# ships a browser.
+steps:
+  - image: qits/build-images/node-base:latest
+    timeout-seconds: 1800
+    script: |
+      set -e
+
+      cat > ~/.npmrc <<EOF
+      registry=${QITS_NPM_PROXY_URL}
+      @qits:registry=${QITS_NPM_REGISTRY_URL}
+      # npm-CLI ceremony only — qits-artifacts requires and reads no credential.
+      ${QITS_NPM_REGISTRY_URL#http:}:_authToken=qits-ci
+      EOF
+
+      pnpm install --frozen-lockfile
+      pnpm lint
+      pnpm test
+      pnpm build
+
+      ver=$(node -p "require('./projects/qits-spa-ui-components/package.json').version")
+      if npm view "@qits/ui-components@$ver" version >/dev/null 2>&1; then
+        echo "@qits/ui-components@$ver is already published — skipping"
+      else
+        npm publish dist/qits-spa-ui-components
+      fi
