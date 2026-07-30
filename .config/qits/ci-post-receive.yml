@@ -44,5 +44,5 @@ steps:
       if npm view "@qits/ui-components@$ver" version >/dev/null 2>&1; then
         echo "@qits/ui-components@$ver is already published — skipping"
       else
-        npm publish dist/qits-spa-ui-components
+        npm publish ./dist/qits-spa-ui-components
       fi
