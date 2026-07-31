@@ -44,3 +44,8 @@ __screenshots__/
 # System files
 .DS_Store
 Thumbs.db
+
+# Storybook: the static build, its logs, and the compodoc metadata regenerated on every run
+/storybook-static
+*storybook.log
+/projects/*/documentation.json

@@ -1,0 +1,14 @@
+/* Storybook compiles the library sources plus its own config, so it needs a wider view than
+   tsconfig.lib.json: the stories that file excludes, `./preview.ts`, and `resolveJsonModule` for
+   the generated documentation.json. Nothing here reaches ng-packagr. */
+{
+  "extends": "../tsconfig.lib.json",
+  "compilerOptions": {
+    "outDir": "../../out-tsc/storybook",
+    "types": ["node"],
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true
+  },
+  "include": ["../src/**/*.ts", "./preview.ts"],
+  "exclude": ["../src/**/*.spec.ts"]
+}

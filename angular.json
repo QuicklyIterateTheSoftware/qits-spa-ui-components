@@ -41,6 +41,20 @@
             ],
             "eslintConfig": "projects/qits-spa-ui-components/eslint.config.js"
           }
+        },
+        "storybook": {
+          "builder": "@storybook/angular-vite:start-storybook",
+          "options": {
+            "configDir": "projects/qits-spa-ui-components/.storybook",
+            "port": 6006
+          }
+        },
+        "build-storybook": {
+          "builder": "@storybook/angular-vite:build-storybook",
+          "options": {
+            "configDir": "projects/qits-spa-ui-components/.storybook",
+            "outputDir": "storybook-static"
+          }
         }
       }
     }

@@ -59,9 +59,11 @@ export class RunSummary { /* … */ }
 ## Development
 
     pnpm install
-    pnpm lint          # eslint + angular-eslint, the qits- selector prefix enforced
-    pnpm test          # vitest under jsdom
-    pnpm build         # ng-packagr → dist/qits-spa-ui-components, then check-exports
+    pnpm lint            # eslint + angular-eslint, the qits- selector prefix enforced
+    pnpm test            # vitest under jsdom
+    pnpm build           # ng-packagr → dist/qits-spa-ui-components, then check-exports
+    pnpm storybook       # the component workbench on :6006
+    pnpm build-storybook # the same, static, into storybook-static/
 
 `pnpm build` runs `scripts/check-exports.mjs` over the output: it is the manifest ng-packagr
 *writes* that gets published, so the check reads that one — the package name, the version against
@@ -78,6 +80,24 @@ Tests run browserless, in jsdom, which is enough for rendering, inputs, projecti
 events. A component that genuinely needs a layout engine gets a `.browser.spec.ts` — the `test`
 target already excludes that suffix — and a `test-browser` target running vitest browser mode;
 until a build image ships a browser, that target is a local-only affair and CI stays on `pnpm test`.
+
+### Storybook
+
+Storybook is the place to *look* at a component, which is the one thing a jsdom spec cannot do.
+Both targets live in `angular.json` and run through **`@storybook/angular-vite`**: this workspace
+builds on Vite under Angular 21, and the webpack-era `@storybook/angular` would mean a second
+toolchain disagreeing with the first. The config is `projects/qits-spa-ui-components/.storybook`.
+
+Stories sit next to the component they document, as `src/lib/<component>.stories.ts` — the same
+place the specs sit. `tsconfig.lib.json` excludes both `*.spec.ts` and `*.stories.ts`, so neither
+reaches the published package; `pnpm build` output stays the five files it always was.
+
+Property tables come from **compodoc**, which the framework runs before either target and which
+reads the components' own JSDoc and `input()` signatures into a gitignored `documentation.json`.
+That is why the doc comments in `src/lib` are worth keeping accurate: they are the docs.
+
+Storybook is a local workbench and not part of the pipeline — `.config/qits/ci-post-receive.yml`
+still installs, lints, tests and builds, and nothing more.
 
 ## Releasing
 
