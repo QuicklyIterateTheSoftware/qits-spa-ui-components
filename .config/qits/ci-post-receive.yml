@@ -20,6 +20,12 @@
 # chromium and CI is not the place to download one. A component that genuinely needs a layout
 # engine gets a `.browser.spec.ts` and a `test-browser` target, run locally until a build image
 # ships a browser.
+#
+# `pnpm build-storybook` ships nothing — storybook-static/ is gitignored and dies with the
+# container. It runs so the workbench cannot rot unnoticed: a story that stops compiling, a broken
+# .storybook config or a compodoc pass that fails to produce the property tables all fail here
+# instead of the next time someone runs `pnpm storybook`. Like the build it is Vite compiling, not
+# a browser rendering, so the browserless image above is enough.
 steps:
   - image: qits/build-images/node-base:latest
     timeout-seconds: 1800
@@ -39,6 +45,7 @@ steps:
       pnpm lint
       pnpm test
       pnpm build
+      pnpm build-storybook
 
       ver=$(node -p "require('./projects/qits-spa-ui-components/package.json').version")
       if npm view "@qits/ui-components@$ver" version >/dev/null 2>&1; then
