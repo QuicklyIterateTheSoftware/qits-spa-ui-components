@@ -2,21 +2,38 @@
 
 The shared Angular component library for qits frontends, published as **`@qits/ui-components`**.
 
-Everything here is *presentational*: standalone components with typed inputs, `OnPush` change
-detection, self-contained styles and no dependency beyond `@angular/core` and `@angular/common`,
-both declared as peers. Nothing in this library fetches, routes, stores or knows a URL — a
-component that needed any of those would belong to the app that has them.
+Standalone components with typed inputs, `OnPush` change detection and self-contained styles.
+Nothing here fetches or stores: a component that needed data would belong to the app that has it.
 
 | Component | Selector | What it is |
 |---|---|---|
 | `QitsButton` | `<qits-button>` | The button. `variant` (`primary`/`secondary`/`ghost`), `size` (`sm`/`md`/`lg`), `type`, `disabled`, `busy`; emits `pressed`. |
 | `QitsBadge` | `<qits-badge>` | A short status word. Required `label`, semantic `tone` (`neutral`/`info`/`success`/`warning`/`danger`). |
 | `QitsCard` | `<qits-card>` | A titled surface. `heading`, `subheading`, `elevated`; projects into the body, and `[qitsCardActions]` into the header. |
+| `QitsMainLayout` | `<qits-main-layout>` | The application skeleton. `brand`, `links` (defaulting to `QITS_NAV_LINKS`); holds the `<router-outlet />` the app's child routes render into. |
 
 `busy` is separate from `disabled` on purpose: both stop a press, but only `busy` sets
 `aria-busy`, so a host can say "working…" without also claiming the action is unavailable. Tones
 are semantic names rather than colours, which keeps a restyle of the whole system inside this
 repository.
+
+`QitsMainLayout` is the one component with a peer beyond `@angular/core` and `@angular/common`: it
+renders a `<router-outlet />`, so `@angular/router` is a peer too. Mount it as the root *route*
+component, never as a tag around your content —
+
+```ts
+export const routes: Routes = [
+  { path: '', component: QitsMainLayout, children: [/* the app */] },
+];
+```
+
+— and the chrome survives navigation while only the outlet changes. Its breakpoint is CSS, not a
+media query in TypeScript: a persistent sidebar from 768px up, a burger in the top bar below it,
+and the burger is the only state the component keeps. The links in `QITS_NAV_LINKS` are plain
+`<a href>` paths rather than routes, because every destination is a *different* Angular application
+behind its own base path — `routerLink` would compile and go nowhere. The entry matching the app's
+own `document.baseURI` is marked `aria-current="page"`. Pass your own `links` to reorder the list
+or splice entries into it.
 
 ## Install
 
@@ -96,8 +113,11 @@ Property tables come from **compodoc**, which the framework runs before either t
 reads the components' own JSDoc and `input()` signatures into a gitignored `documentation.json`.
 That is why the doc comments in `src/lib` are worth keeping accurate: they are the docs.
 
-Storybook is a local workbench and not part of the pipeline — `.config/qits/ci-post-receive.yml`
-still installs, lints, tests and builds, and nothing more.
+`pnpm build-storybook` runs in the pipeline too. It ships nothing — `storybook-static/` is
+gitignored and dies with the container — but it compiles every story, the `.storybook` config and
+the compodoc pass, so a broken workbench surfaces on push rather than the next time someone opens
+it. Like the build it is Vite compiling, not a browser rendering, so the browserless CI image is
+enough.
 
 ## Releasing
 

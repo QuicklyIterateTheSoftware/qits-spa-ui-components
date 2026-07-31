@@ -1,8 +1,8 @@
 # @qits/ui-components
 
-Presentational Angular components shared across qits frontends: `QitsButton`, `QitsBadge` and
-`QitsCard`. Standalone, `OnPush`, self-contained styles, `@angular/core` and `@angular/common` as
-the only peers.
+Angular components shared across qits frontends: `QitsButton`, `QitsBadge`, `QitsCard` and the
+application skeleton `QitsMainLayout`. Standalone, `OnPush`, self-contained styles; `@angular/core`
+and `@angular/common` are peers, and `@angular/router` for the layout's `<router-outlet />`.
 
 ## Install
 
@@ -30,6 +30,21 @@ import { QitsBadge, QitsButton, QitsCard } from '@qits/ui-components';
 })
 export class RunSummary { /* … */ }
 ```
+
+`QitsMainLayout` is the root *route* component, not a wrapper tag — mounting it there is what keeps
+the chrome alive across navigation:
+
+```ts
+import { QITS_NAV_LINKS, QitsMainLayout } from '@qits/ui-components';
+
+export const routes: Routes = [
+  { path: '', component: QitsMainLayout, children: [/* the app */] },
+];
+```
+
+Sidebar from 768px up, burger below it, all in CSS. Its `links` default to `QITS_NAV_LINKS` —
+every SPA of the platform, as plain `<a href>` paths, because each one is a separate application
+behind its own base path.
 
 Source, the component reference and the development commands are in the
 [repository README](https://github.com/QuicklyIterateTheSoftware/qits-spa-ui-components).
