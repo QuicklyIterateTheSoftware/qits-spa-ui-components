@@ -1,6 +1,6 @@
 {
   "name": "@qits/ui-components",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Presentational Angular components shared across qits frontends.",
   "license": "MIT",
   "repository": {

@@ -29,6 +29,7 @@ export const QITS_NAV_LINKS: readonly QitsNavLink[] = [
   { label: 'Artifacts', href: '/artifacts/' },
   { label: 'Projects', href: '/projects/' },
   { label: 'Workspaces', href: '/workspaces/' },
+  { label: 'Events', href: '/events/' },
   { label: 'Observability', href: '/observability/' },
 ];
 

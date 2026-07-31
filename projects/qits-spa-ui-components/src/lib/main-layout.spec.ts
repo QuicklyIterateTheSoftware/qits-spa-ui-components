@@ -27,6 +27,7 @@ describe('QitsMainLayout', () => {
       'Artifacts',
       'Projects',
       'Workspaces',
+      'Events',
       'Observability',
     ]);
     expect(anchors.map((a) => a.getAttribute('href'))).toEqual(
