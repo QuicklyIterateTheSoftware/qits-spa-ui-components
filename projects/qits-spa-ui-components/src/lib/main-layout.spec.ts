@@ -24,6 +24,7 @@ describe('QitsMainLayout', () => {
     expect(anchors.map((a) => a.textContent?.trim())).toEqual([
       'Home',
       'CI',
+      'CD',
       'Artifacts',
       'Projects',
       'Workspaces',

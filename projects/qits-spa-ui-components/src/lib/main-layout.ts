@@ -26,6 +26,7 @@ export interface QitsNavLink {
 export const QITS_NAV_LINKS: readonly QitsNavLink[] = [
   { label: 'Home', href: '/' },
   { label: 'CI', href: '/ci/' },
+  { label: 'CD', href: '/cd/' },
   { label: 'Artifacts', href: '/artifacts/' },
   { label: 'Projects', href: '/projects/' },
   { label: 'Workspaces', href: '/workspaces/' },
