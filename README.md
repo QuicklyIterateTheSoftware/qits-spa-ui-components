@@ -121,12 +121,20 @@ enough.
 
 ## Releasing
 
-Push to `main` and the pipeline in `.config/qits/ci-post-receive.yml` installs, lints, tests,
-builds and then **publishes if absent**: it reads the version from
-`projects/qits-spa-ui-components/package.json`, asks the registry whether that version exists, and
-publishes only when it does not. So a release is an ordinary version-bump commit, and every other
-push — a doc fix, a re-run — stays green without touching the registry. Published versions are
-immutable; there is no unpublish.
+Two pipelines publish, and they publish different things.
 
-The release train runs through this library: a release here publishes `SoftwareRelease`, and the
-consumers that declare a trigger bump their pin and release in turn (release-train-hops-plan.md).
+`.config/qits/ci-post-receive.yml` runs on every push to `main`. It installs, lints, tests, builds
+and publishes `<last released version>-main.g<sha7>` under the **`main`** dist-tag — a build of the
+branch, named so nobody mistakes it for a release. The explicit `--tag main` is load-bearing: a bare
+`npm publish` would move `latest` to a prerelease.
+
+`.config/qits/ci-event-release.yml` is the release pipeline. It reacts to this repository's own
+`SCMRelease`, checks out the annotated tag the release push created, builds it and publishes the
+real version under `latest`. Both publish **if absent** — published versions are immutable and an
+event can be redelivered, so a second run of one release goes green rather than fighting the
+registry.
+
+The release train runs through this library. `SCMRelease` says only that source control has the
+version; `SoftwareRelease` is what qits-ci publishes when the release pipeline goes green, and it
+means the tarball is in the registry. Consumers trigger on the second one, so a bump pipeline can
+install what it was told about (scm-release-split-plan.md).
