@@ -127,3 +127,6 @@ builds and then **publishes if absent**: it reads the version from
 publishes only when it does not. So a release is an ordinary version-bump commit, and every other
 push — a doc fix, a re-run — stays green without touching the registry. Published versions are
 immutable; there is no unpublish.
+
+The release train runs through this library: a release here publishes `SoftwareRelease`, and the
+consumers that declare a trigger bump their pin and release in turn (release-train-hops-plan.md).
