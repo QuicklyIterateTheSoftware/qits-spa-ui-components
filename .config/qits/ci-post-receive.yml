@@ -1,8 +1,21 @@
 # The pipeline qits-ci runs on every push to a tracked branch of this repository.
 #
-# One step, and no `docker: true` anywhere in it: publishing an npm package needs nothing but HTTP
-# from this container to qits-artifacts on qits-net, so this step keeps the ordinary sandbox that
-# an image-publishing step has to give up.
+# TWO STEPS, AND THE SPLIT IS THE POINT: the first checks every push, the second publishes and runs
+# on `main` alone. They were one step, and that made a task-branch push publish a prerelease whose
+# identifier said `main` from a commit that was never on it — observed as
+# `2026.801.63140-main.gab854a1`. The name was the lie, not the tarball, and `branches:` is the key
+# that fixes it: absent means every branch, so the check step keeps the behaviour it has always had.
+#
+# THE COST IS ONE EXTRA INSTALL AND BUILD ON EVERY `main` PUSH. No state crosses steps — each one
+# gets a fresh container and its own clone — so the publish step has to produce `dist/` itself. The
+# cheaper spellings were both worse: binding the single step to `main` would stop testing every
+# other branch, and a `case "$QITS_CI_BRANCH"` guard inside one step would leave the pipeline file
+# saying nothing about where it publishes. The step-level filter is what a reader and the engine
+# both see.
+#
+# Neither step declares `docker: true`: publishing an npm package needs nothing but HTTP from this
+# container to qits-artifacts on qits-net, so both keep the ordinary sandbox that an
+# image-publishing step has to give up.
 #
 # The two registry URLs arrive as environment — QITS_NPM_PROXY_URL (the pull-through cache of
 # npmjs) and QITS_NPM_REGISTRY_URL (the hosted repository we publish into) — so no deployment fact
@@ -13,25 +26,8 @@
 #
 # THIS PIPELINE PUBLISHES PRERELEASES ONLY. The release itself belongs to ci-event-release.yml,
 # which reacts to this repository's SCMRelease, checks out the tag and publishes the real version.
-# What a push produces is `<last released version>-main.g<sha7>` — the last released version as the
-# base, so the prerelease sorts just under the release it follows and above everything older.
-#
-# THE `g` IS LOAD-BEARING. It keeps the identifier alphanumeric, which is what stops semver's
-# leading-zero rule from ever firing on an all-digit sha. Without it, one sha in sixteen would make
-# the version string invalid and the publish would fail for a reason nobody could see in the diff.
-#
-# `--tag main` IS MANDATORY, NOT TIDINESS. A bare `npm publish` means `--tag latest`, and the
-# registry now refuses any publish that would move `latest` to a lower-sorting version — a
-# prerelease sorts below its release, so it refuses the whole publish with a 403. That rule is the
-# guard; this flag is how the pipeline stays on the right side of it.
-#
-# The version is set on the BUILT manifest under dist/, never in the tree: nothing is committed,
-# the release gate stays the version in projects/qits-spa-ui-components/package.json, and the build
-# above (`check-exports`) still compares dist against that untouched source.
-#
-# Publish-if-absent survives all of it: a re-run of the same sha computes the same version, finds it
-# in the registry and succeeds without touching it. Versions are immutable, so this never fights the
-# registry.
+# What a push to main produces is `<last released version>-main.g<sha7>` — the last released version
+# as the base, so the prerelease sorts just under the release it follows and above everything older.
 #
 # The test step runs the jsdom target (`pnpm test`), never vitest browser mode: this image has no
 # chromium and CI is not the place to download one. A component that genuinely needs a layout
@@ -44,11 +40,14 @@
 # instead of the next time someone runs `pnpm storybook`. Like the build it is Vite compiling, not
 # a browser rendering, so the browserless image above is enough.
 steps:
+    # EVERY BRANCH, no `branches:` key — this is the check every push gets, and it is byte for byte
+    # what the single step used to do minus its publish tail.
   - image: qits/build-images/node-base:latest
     timeout-seconds: 1800
     script: |
       # -u is load-bearing: with the registry vars unset, an unset-tolerant script writes a
-      # registry-less .npmrc and the publish below goes to npmjs.org instead of failing here.
+      # registry-less .npmrc and the install below resolves the @qits scope against npmjs.org,
+      # where these packages do not exist and never will.
       set -eu
 
       cat > ~/.npmrc <<EOF
@@ -64,11 +63,65 @@ steps:
       pnpm build
       pnpm build-storybook
 
+    # MAIN ONLY. `-main.g<sha7>` names a branch, so it may only ever be cut from that branch.
+    #
+    # It runs after the checks above, in the same run, on the same push. That ordering IS the "only
+    # publish if the tests passed" rule — a failing step stops the loop, so this one is simply never
+    # reached. On every other branch it is recorded SKIPPED and changes nothing.
+    #
+    # `--tag main` IS MANDATORY, NOT TIDINESS. A bare `npm publish` means `--tag latest`, and the
+    # registry refuses any publish that would move `latest` to a lower-sorting version — a
+    # prerelease sorts below its release, so it refuses the whole publish with a 403. That rule is
+    # the guard; this flag is how the pipeline stays on the right side of it.
+    #
+    # THE `g` IS LOAD-BEARING. It keeps the identifier alphanumeric, which is what stops semver's
+    # leading-zero rule from ever firing on an all-digit sha. Without it, one sha in sixteen would
+    # make the version string invalid and the publish would fail for a reason nobody could see in
+    # the diff.
+    #
+    # The version is set on the BUILT manifest under dist/, never in the tree: nothing is committed,
+    # the release gate stays the version in projects/qits-spa-ui-components/package.json, and
+    # `check-exports` still compares dist against that untouched source.
+    #
+    # Publish-if-absent survives all of it: a re-run of the same sha computes the same version,
+    # finds it in the registry and succeeds without touching it. Versions are immutable, so this
+    # never fights the registry.
+  - image: qits/build-images/node-base:latest
+    branches:
+      - exact: main
+    timeout-seconds: 1800
+    script: |
+      set -eu
+
+      # DEFENCE IN DEPTH against an older or rolled-back qits-ci. An engine that does not know the
+      # `branches:` key above ignores it and runs this step on EVERY push — which is the exact
+      # defect this split fixes. Free when the filter works, and a loud red step instead of a
+      # mislabelled prerelease when it does not. The same guard qits-spa-home's maintenance leg
+      # carries, for the same reason.
+      if [ "$QITS_CI_BRANCH" != "main" ]; then
+        echo "not main: $QITS_CI_BRANCH"
+        exit 1
+      fi
+
+      cat > ~/.npmrc <<EOF
+      registry=${QITS_NPM_PROXY_URL}
+      @qits:registry=${QITS_NPM_REGISTRY_URL}
+      # npm-CLI ceremony only — qits-artifacts requires and reads no credential.
+      ${QITS_NPM_REGISTRY_URL#http:}:_authToken=qits-ci
+      EOF
+
       base=$(node -p "require('./projects/qits-spa-ui-components/package.json').version")
       ver="$base-main.g${QITS_CI_SHA:0:7}"
       if npm view "@qits/ui-components@$ver" version >/dev/null 2>&1; then
         echo "@qits/ui-components@$ver is already published — skipping"
-      else
-        (cd ./dist/qits-spa-ui-components && npm version "$ver" --no-git-tag-version)
-        npm publish ./dist/qits-spa-ui-components --tag main
+        exit 0
       fi
+
+      # The step's own dist/, because no state crosses steps. Lint, tests and the workbench are the
+      # first step's job and are not repeated: this build exists to produce the tarball, and a
+      # second opinion on a tree that just passed would only cost minutes.
+      pnpm install --frozen-lockfile
+      pnpm build
+
+      (cd ./dist/qits-spa-ui-components && npm version "$ver" --no-git-tag-version)
+      npm publish ./dist/qits-spa-ui-components --tag main
