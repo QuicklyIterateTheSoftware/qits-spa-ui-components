@@ -11,10 +11,27 @@
 # pre-flight, which refuses to publish when no credential is configured. The server reads nothing,
 # and the line goes away the day npm accepts an anonymous publish.
 #
-# Versioning is publish-if-absent: the version in projects/qits-spa-ui-components/package.json is
-# the release gate. A re-run, a README push or any commit that does not bump it finds the version
-# already in the registry and succeeds without touching it; versions are immutable, so this never
-# fights the registry. Bump the version to release.
+# THIS PIPELINE PUBLISHES PRERELEASES ONLY. The release itself belongs to ci-event-release.yml,
+# which reacts to this repository's SCMRelease, checks out the tag and publishes the real version.
+# What a push produces is `<last released version>-main.g<sha7>` — the last released version as the
+# base, so the prerelease sorts just under the release it follows and above everything older.
+#
+# THE `g` IS LOAD-BEARING. It keeps the identifier alphanumeric, which is what stops semver's
+# leading-zero rule from ever firing on an all-digit sha. Without it, one sha in sixteen would make
+# the version string invalid and the publish would fail for a reason nobody could see in the diff.
+#
+# `--tag main` IS MANDATORY, NOT TIDINESS. A bare `npm publish` means `--tag latest`, and the
+# registry now refuses any publish that would move `latest` to a lower-sorting version — a
+# prerelease sorts below its release, so it refuses the whole publish with a 403. That rule is the
+# guard; this flag is how the pipeline stays on the right side of it.
+#
+# The version is set on the BUILT manifest under dist/, never in the tree: nothing is committed,
+# the release gate stays the version in projects/qits-spa-ui-components/package.json, and the build
+# above (`check-exports`) still compares dist against that untouched source.
+#
+# Publish-if-absent survives all of it: a re-run of the same sha computes the same version, finds it
+# in the registry and succeeds without touching it. Versions are immutable, so this never fights the
+# registry.
 #
 # The test step runs the jsdom target (`pnpm test`), never vitest browser mode: this image has no
 # chromium and CI is not the place to download one. A component that genuinely needs a layout
@@ -47,9 +64,11 @@ steps:
       pnpm build
       pnpm build-storybook
 
-      ver=$(node -p "require('./projects/qits-spa-ui-components/package.json').version")
+      base=$(node -p "require('./projects/qits-spa-ui-components/package.json').version")
+      ver="$base-main.g${QITS_CI_SHA:0:7}"
       if npm view "@qits/ui-components@$ver" version >/dev/null 2>&1; then
         echo "@qits/ui-components@$ver is already published — skipping"
       else
-        npm publish ./dist/qits-spa-ui-components
+        (cd ./dist/qits-spa-ui-components && npm version "$ver" --no-git-tag-version)
+        npm publish ./dist/qits-spa-ui-components --tag main
       fi
