@@ -138,3 +138,5 @@ The release train runs through this library. `SCMRelease` says only that source 
 version; `SoftwareRelease` is what qits-ci publishes when the release pipeline goes green, and it
 means the tarball is in the registry. Consumers trigger on the second one, so a bump pipeline can
 install what it was told about (scm-release-split-plan.md).
+
+The layout links the deployments UI at `/platform-deployments/` (qits-platform-deployments).
