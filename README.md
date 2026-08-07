@@ -5,13 +5,21 @@ The shared Angular component library for qits frontends, published as **`@qits/u
 Standalone components with typed inputs, `OnPush` change detection and self-contained styles.
 Nothing here fetches or stores: a component that needed data would belong to the app that has it.
 
+**One exception, and only one: `QitsMainLayout` asks the platform what the platform contains.** The
+rule holds because it is about *ownership* — a component must not go looking for data some
+application already has. The chrome is the case where no application has it. What the platform
+routes is known to the gateway and to nothing else; each SPA knows only itself. So the navigation
+arrives over `QITS_NAVIGATION`, which `provideQitsNavigation()` answers with one `GET
+/main-navigation`. Everything else in this package still takes what it renders as an input.
+
 | Component | Selector | What it is |
 |---|---|---|
 | `QitsButton` | `<qits-button>` | The button. `variant` (`primary`/`secondary`/`ghost`), `size` (`sm`/`md`/`lg`), `type`, `disabled`, `busy`; emits `pressed`. |
 | `QitsBadge` | `<qits-badge>` | A short status word. Required `label`, semantic `tone` (`neutral`/`info`/`success`/`warning`/`danger`). |
 | `QitsCard` | `<qits-card>` | A titled surface. `heading`, `subheading`, `elevated`; projects into the body, and `[qitsCardActions]` into the header. |
 | `QitsPicker` | `<qits-picker>` | Pick one of a list. Required `options` (`{ value: T, label: string }[]`), two-way `value` of `T \| undefined`; `compareWith`, `placeholder`, `disabled`. |
-| `QitsMainLayout` | `<qits-main-layout>` | The application skeleton. `brand`, `links` (defaulting to `QITS_NAV_LINKS`); holds the `<router-outlet />` the app's child routes render into. |
+| `QitsMainLayout` | `<qits-main-layout>` | The application skeleton. `brand`, `links` (an override; the navigation comes from `QITS_NAVIGATION`); holds the `<router-outlet />` the app's child routes render into. |
+| `QitsNavSubmenu` | `[qitsNavSubmenu]` | Marks an `<ng-template>` as the sub-menu under the current navigation entry. The layout gives it a box; the app styles what goes in it. |
 
 `busy` is separate from `disabled` on purpose: both stop a press, but only `busy` sets
 `aria-busy`, so a host can say "working…" without also claiming the action is unavailable. Tones
@@ -54,11 +62,62 @@ export const routes: Routes = [
 
 — and the chrome survives navigation while only the outlet changes. Its breakpoint is CSS, not a
 media query in TypeScript: a persistent sidebar from 768px up, a burger in the top bar below it,
-and the burger is the only state the component keeps. The links in `QITS_NAV_LINKS` are plain
-`<a href>` paths rather than routes, because every destination is a *different* Angular application
-behind its own base path — `routerLink` would compile and go nowhere. The entry matching the app's
-own `document.baseURI` is marked `aria-current="page"`. Pass your own `links` to reorder the list
-or splice entries into it.
+and the burger is the only state the component keeps. The entries are plain `<a href>` paths rather
+than routes, because every destination is a *different* Angular application behind its own base
+path — `routerLink` would compile and go nowhere. The entry matching the app's own
+`document.baseURI` is marked `aria-current="page"`.
+
+### Where the links come from
+
+```ts
+bootstrapApplication(App, {
+  providers: [provideHttpClient(), provideRouter(routes), provideQitsNavigation()],
+});
+```
+
+`provideQitsNavigation()` issues one `GET /main-navigation` for the life of the application and
+gives the answer — `{"links":[{"label":"Home","href":"/"},…]}` — to the layout. The URL is
+**absolute**, deliberately unlike the platform's `api/config.json` convention of a SPA reading from
+its own backend: the gateway is the only process that knows what the platform routes, and the only
+one with no path segment of its own. It requires `provideHttpClient()`; it provides nothing else.
+
+`provideQitsNavigationLinks([…])` answers the same contract from a literal, for specs, stories and
+an `ng serve` with no gateway in front of it. Nothing is fetched, so there is no request to flush
+and no pending task to wait on.
+
+Three states, and no compiled-in list behind any of them:
+
+- **waiting** — no entries, and `aria-busy` on the `<nav>`;
+- **answered** — the entries, as above;
+- **stranded** (empty answer, request failed, or no provider at all) — one link to `/` under a
+  "Navigation unavailable" line. `/` is the gateway's own root rather than a registry entry, so it
+  is the one destination that cannot go stale.
+
+A fallback list compiled in here would put back the drift this replaced *and hide it*: the chrome
+would sometimes show what the platform routes and sometimes a guess frozen at release time, with
+nothing on screen telling them apart.
+
+`[links]` is an explicit override. A **non-empty** list wins outright and the source is not
+consulted, which is what lets a story or a spec render the real chrome with no provider anywhere.
+Empty — the default — means "ask".
+
+### The sub-menu
+
+An application can hang its own menu under its own entry: a documentation tree, a version picker.
+Declare it **in the app shell, beside the `<router-outlet />`** —
+
+```html
+<ng-template qitsNavSubmenu><app-doc-tree /></ng-template>
+<router-outlet />
+```
+
+— and never inside a page. Getting that wrong is silent: a page's declaration is destroyed and
+rebuilt on every navigation, so the panel would lose its scroll position and every open group on
+each hop, in a menu that did not itself change. The layout renders it in a bare block and styles
+nothing inside it, and the content keeps the shell's style scope, because view encapsulation
+follows where a node is declared rather than where it is inserted. Where no entry is this
+application — the gateway does not route it yet, a bare `ng serve` — the sub-menu goes to the foot
+of the navigation instead of nowhere.
 
 ## Install
 
@@ -164,4 +223,6 @@ version; `SoftwareRelease` is what qits-ci publishes when the release pipeline g
 means the tarball is in the registry. Consumers trigger on the second one, so a bump pipeline can
 install what it was told about (scm-release-split-plan.md).
 
-The layout links the deployments UI at `/platform-deployments/` (qits-platform-deployments).
+The layout no longer carries a list of the platform's doors. It asks the gateway, which derives the
+answer from the routes it actually serves — so a component appearing, moving or being retired is one
+deployment of one process, not a release here and a bump in nine SPAs.

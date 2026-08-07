@@ -1,8 +1,10 @@
 # @qits/ui-components
 
-Angular components shared across qits frontends: `QitsButton`, `QitsBadge`, `QitsCard` and the
-application skeleton `QitsMainLayout`. Standalone, `OnPush`, self-contained styles; `@angular/core`
-and `@angular/common` are peers, and `@angular/router` for the layout's `<router-outlet />`.
+Angular components shared across qits frontends: `QitsButton`, `QitsBadge`, `QitsCard`, `QitsPicker`
+and the application skeleton `QitsMainLayout`. Standalone, `OnPush`, self-contained styles;
+`@angular/core` and `@angular/common` are peers, and `@angular/router` for the layout's
+`<router-outlet />`. The layout's navigation comes over `@angular/common/http`, a subpath of a peer
+already there — nothing new to install.
 
 ## Install
 
@@ -35,16 +37,29 @@ export class RunSummary { /* … */ }
 the chrome alive across navigation:
 
 ```ts
-import { QITS_NAV_LINKS, QitsMainLayout } from '@qits/ui-components';
+import { provideQitsNavigation, QitsMainLayout } from '@qits/ui-components';
 
 export const routes: Routes = [
   { path: '', component: QitsMainLayout, children: [/* the app */] },
 ];
+
+bootstrapApplication(App, {
+  providers: [provideHttpClient(), provideRouter(routes), provideQitsNavigation()],
+});
 ```
 
-Sidebar from 768px up, burger below it, all in CSS. Its `links` default to `QITS_NAV_LINKS` —
-every SPA of the platform, as plain `<a href>` paths, because each one is a separate application
-behind its own base path.
+Sidebar from 768px up, burger below it, all in CSS. The entries are plain `<a href>` paths, because
+each destination is a separate application behind its own base path.
+
+`provideQitsNavigation()` — which needs `provideHttpClient()` — asks the gateway once, at
+`/main-navigation`, what the platform contains; nothing here is compiled in. Until it answers the
+navigation is empty and `aria-busy`; if it fails or comes back empty the layout offers one link to
+`/`. `provideQitsNavigationLinks([…])` answers the same contract from a literal, without a request,
+for specs and stories. A non-empty `[links]` input overrides both.
+
+An app can hang its own menu under its own entry with `<ng-template qitsNavSubmenu>` — declared in
+the app shell beside the `<router-outlet />`, never inside a page, or it is rebuilt on every
+navigation and loses its state.
 
 Source, the component reference and the development commands are in the
 [repository README](https://github.com/QuicklyIterateTheSoftware/qits-spa-ui-components).

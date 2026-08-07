@@ -1,3 +1,4 @@
+import { NgTemplateOutlet } from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -9,30 +10,8 @@ import {
 } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 
-/** One entry in the platform navigation: what it is called, and where it lives. */
-export interface QitsNavLink {
-  readonly label: string;
-  readonly href: string;
-}
-
-/**
- * Every SPA of the platform, in the order they are shown. These are *separate* Angular
- * applications served at different base paths, so the hrefs are absolute paths rather than routes:
- * moving between them is a full-document navigation, which no router can perform.
- *
- * Exported so an app can reuse the list, reorder it, or splice its own entries in and hand the
- * result back to `<qits-main-layout [links]="…">`.
- */
-export const QITS_NAV_LINKS: readonly QitsNavLink[] = [
-  { label: 'Home', href: '/' },
-  { label: 'CI', href: '/ci/' },
-  { label: 'Deployments', href: '/platform-deployments/' },
-  { label: 'Artifacts', href: '/artifacts/' },
-  { label: 'Projects', href: '/projects/' },
-  { label: 'Workspaces', href: '/workspaces/' },
-  { label: 'Events', href: '/events/' },
-  { label: 'Observability', href: '/observability/' },
-];
+import { QitsNavSubmenuSlot } from './nav-submenu';
+import { QITS_NAVIGATION, type QitsNavLink } from './navigation';
 
 /** `/ci` and `/ci/` name the same application; comparing normalised paths keeps the match honest. */
 function toDirectoryPath(href: string): string {
@@ -51,12 +30,18 @@ function toDirectoryPath(href: string): string {
  *
  * The links leave the SPA on purpose. Each destination is its own Angular application behind its
  * own base path, so they are plain `<a href>` full-document navigations — `routerLink` would look
- * right and go nowhere.
+ * right and go nowhere. Where the list *comes from* is `QITS_NAVIGATION`: the platform is asked
+ * what it contains rather than told at compile time, because a list compiled into this package is
+ * a second source of truth for the platform's own topology and it will lag the first one.
+ *
+ * Under the entry that is this application, an app can hang a sub-menu of its own —
+ * `<ng-template qitsNavSubmenu>` in the shell, see {@link QitsNavSubmenu}. The layout gives it a
+ * bare block and styles nothing inside it.
  */
 @Component({
   selector: 'qits-main-layout',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterOutlet],
+  imports: [RouterOutlet, NgTemplateOutlet],
   template: `
     <div class="qits-layout">
       <header class="qits-layout-bar">
@@ -78,6 +63,7 @@ function toDirectoryPath(href: string): string {
         class="qits-layout-nav"
         [class.qits-layout-nav-open]="navOpen()"
         [attr.aria-label]="brand() + ' navigation'"
+        [attr.aria-busy]="pending() ? 'true' : null"
       >
         <ul class="qits-layout-links">
           @for (link of navLinks(); track link.href) {
@@ -90,9 +76,39 @@ function toDirectoryPath(href: string): string {
                 (click)="closeNav()"
                 >{{ link.label }}</a
               >
+              @if (link.current) {
+                <!-- Two nested @if rather than one condition: \`link.current && submenu()\` narrows to
+                     \`TemplateRef | false | null\`, which ngTemplateOutlet rejects under strictTemplates. -->
+                @if (submenu(); as tpl) {
+                  <!-- The click handler only closes the mobile panel behind a link the browser was
+                       going to follow anyway. Giving this box focus would put a tab stop in front of
+                       the sub-menu's own controls, which a keyboard reaches directly. -->
+                  <!-- eslint-disable-next-line @angular-eslint/template/interactive-supports-focus, @angular-eslint/template/click-events-have-key-events -->
+                  <div class="qits-layout-submenu" (click)="onSubmenuNavigate($event)">
+                    <ng-container [ngTemplateOutlet]="tpl" />
+                  </div>
+                }
+              }
             </li>
           }
         </ul>
+
+        @if (stranded()) {
+          <p class="qits-layout-stranded">Navigation unavailable</p>
+          <a class="qits-layout-escape" href="/" (click)="closeNav()">Home</a>
+        }
+
+        @if (!hasCurrent()) {
+          @if (submenu(); as tpl) {
+            <!-- eslint-disable-next-line @angular-eslint/template/interactive-supports-focus, @angular-eslint/template/click-events-have-key-events -->
+            <div
+              class="qits-layout-submenu qits-layout-submenu-detached"
+              (click)="onSubmenuNavigate($event)"
+            >
+              <ng-container [ngTemplateOutlet]="tpl" />
+            </div>
+          }
+        }
       </nav>
 
       <main class="qits-layout-content">
@@ -147,6 +163,10 @@ function toDirectoryPath(href: string): string {
       grid-column: 1;
       grid-row: 2;
       display: none;
+      /* A grid item is min-height: auto, so it refuses to shrink below its content. Without this a
+         tall sub-menu grows the grid row instead of scrolling here, and the sidebar — with the
+         burger and the content beneath it — runs off the bottom of the viewport. */
+      min-height: 0;
       overflow-y: auto;
       background: #f9fafb;
       border-bottom: 1px solid #e5e7eb;
@@ -179,6 +199,34 @@ function toDirectoryPath(href: string): string {
       color: #111827;
       font-weight: 600;
     }
+
+    /* A box, not a look. What goes in here is the application's, declared in the application's own
+       style scope, so the layout gives it room and nothing else. */
+    .qits-layout-submenu {
+      display: block;
+      min-width: 0;
+    }
+
+    .qits-layout-stranded {
+      margin: 0;
+      padding: 8px 18px 2px;
+      font-size: 13px;
+      color: #6b7280;
+    }
+    .qits-layout-escape {
+      display: block;
+      margin: 0 8px 8px;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 14px;
+      color: #374151;
+      text-decoration: none;
+    }
+    .qits-layout-escape:hover {
+      background: #f3f4f6;
+      color: #111827;
+    }
+
     .qits-layout-content {
       grid-column: 1;
       grid-row: 3;
@@ -202,6 +250,9 @@ function toDirectoryPath(href: string): string {
       .qits-layout-nav {
         grid-row: 2;
         display: block;
+        /* Restated with the row: as a full-height column the sidebar is the item a tall sub-menu
+           would stretch, and min-height: auto would let it push the grid past the viewport. */
+        min-height: 0;
         border-bottom: none;
         border-right: 1px solid #e5e7eb;
       }
@@ -215,10 +266,23 @@ function toDirectoryPath(href: string): string {
 export class QitsMainLayout {
   /** What the bar calls this platform. */
   readonly brand = input<string>('qits');
-  /** The destinations shown in the navigation; every qits SPA by default. */
-  readonly links = input<readonly QitsNavLink[]>(QITS_NAV_LINKS);
+  /**
+   * An explicit override of the platform navigation. Left empty — the default — the layout asks
+   * `QITS_NAVIGATION` instead. A **non-empty** list wins outright and the source is not consulted
+   * at all, which is what lets a story, a spec or a `ng serve` with no gateway in front of it
+   * render the real chrome with no provider anywhere.
+   */
+  readonly links = input<readonly QitsNavLink[]>([]);
 
   private readonly doc = inject(DOCUMENT);
+  /**
+   * Optional on purpose. An app that forgets the provider lands in the stranded state below — one
+   * way out, and a line saying so — rather than failing to bootstrap at all with NG0201.
+   */
+  private readonly source = inject(QITS_NAVIGATION, { optional: true });
+
+  /** What an application hung under its own entry, if anything. */
+  protected readonly submenu = inject(QitsNavSubmenuSlot).template;
 
   /**
    * Which link is *this* application. Read once from the document's base URI rather than from the
@@ -229,12 +293,46 @@ export class QitsMainLayout {
 
   protected readonly navOpen = signal(false);
 
+  /**
+   * The list to render, or `undefined` for "nobody has answered yet".
+   *
+   * There is deliberately **no compiled-in fallback list**. Shipping the platform's front doors
+   * here as a safety net would put back the exact defect this replaced *and hide it*: the chrome
+   * would sometimes show what the platform routes and sometimes a guess frozen at release time,
+   * with nothing on screen telling the two apart. An honest empty state is worth more than a
+   * plausible wrong one — so a source that answers with nothing strands the reader visibly.
+   */
+  private readonly resolved = computed<readonly QitsNavLink[] | undefined>(() => {
+    const own = this.links();
+    // `own?.length`, not `own.length`: `withComponentInputBinding()` writes `undefined` into a route
+    // component's inputs for every route parameter it cannot supply, and it has wiped this one
+    // before. An input with a default is not a guarantee of a value.
+    if (own?.length) return own;
+    // No provider at all is not "waiting" — nothing is coming. Strand it rather than spin forever.
+    return this.source ? this.source.links() : [];
+  });
+
+  /** Nothing has answered yet: render no links and say so on the `<nav>`. */
+  protected readonly pending = computed(() => this.resolved() === undefined);
+
+  /** Answered, but with nothing — an empty list or a request that failed. */
+  protected readonly stranded = computed(() => this.resolved()?.length === 0);
+
   protected readonly navLinks = computed(() =>
-    this.links().map((link) => ({
+    (this.resolved() ?? []).map((link) => ({
       ...link,
       current: toDirectoryPath(link.href) === this.basePath,
     })),
   );
+
+  /**
+   * Whether any entry is this application. False whenever nothing in the list is where this app is
+   * served from: the gateway does not route it yet, or it is a bare `ng serve` on a port of its own.
+   * The sub-menu still has to go somewhere, so it goes to the foot of the navigation rather than
+   * nowhere — the two placements are mutually exclusive by construction, so it is instantiated at
+   * most once either way.
+   */
+  protected readonly hasCurrent = computed(() => this.navLinks().some((link) => link.current));
 
   protected toggleNav(): void {
     this.navOpen.update((open) => !open);
@@ -243,5 +341,14 @@ export class QitsMainLayout {
   /** A link is a full-document navigation, but the panel must not be left open behind it. */
   protected closeNav(): void {
     this.navOpen.set(false);
+  }
+
+  /**
+   * Close the mobile panel for a sub-menu *link*, and nothing else. A sub-menu is a tree, not a
+   * list of destinations: closing on every click would collapse the whole panel the moment someone
+   * expanded a group to look inside it.
+   */
+  protected onSubmenuNavigate(event: Event): void {
+    if ((event.target as Element | null)?.closest('a')) this.closeNav();
   }
 }
