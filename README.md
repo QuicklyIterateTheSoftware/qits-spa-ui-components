@@ -138,6 +138,26 @@ The published package is the **prebuilt ng-packagr output** — FESM bundles and
 Angular's partial compilation format. There is nothing to compile on install and no `prepare` hook;
 consumers install a tarball like any other dependency.
 
+### Pinning a `main` build takes an exact version, never a caret
+
+A build off `main` is published as `<last released version>-main.g<sha7>` (see *Releasing*), and a
+consumer reaching for one ahead of its release must spell it **exactly**:
+
+    "@qits/ui-components": "2026.806.184725-main.gc03ad30"     # yes
+    "@qits/ui-components": "^2026.806.184725-main.gc03ad30"    # no
+
+The caret range admits `2026.806.184725` as well — a prerelease sorts *below* the release it is
+named after, so npm resolves the release and never mentions the prerelease again. What arrives is
+the build the caller was trying to get ahead of, and the failure lands somewhere else entirely:
+`error TS2305: Module '@qits/ui-components' has no exported member 'QitsPicker'`.
+
+The trap is quiet because the caret usually works. It did for the first client to pin a `main`
+build — but only because no stable release of that version existed yet for the range to prefer.
+The moment one did, every caret pin silently moved backwards.
+
+A pin like this is temporary by nature. Once the release lands, the range goes back to an ordinary
+`^<version>`, and the maintenance-hop pipelines described in *Releasing* write exactly that.
+
 Then, in a standalone component:
 
 ```ts
