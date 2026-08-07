@@ -34,11 +34,17 @@
 # engine gets a `.browser.spec.ts` and a `test-browser` target, run locally until a build image
 # ships a browser.
 #
-# `pnpm build-storybook` ships nothing — storybook-static/ is gitignored and dies with the
+# `pnpm build-storybook` ships nothing FROM HERE — storybook-static/ is gitignored and dies with the
 # container. It runs so the workbench cannot rot unnoticed: a story that stops compiling, a broken
 # .storybook config or a compodoc pass that fails to produce the property tables all fail here
 # instead of the next time someone runs `pnpm storybook`. Like the build it is Vite compiling, not
 # a browser rendering, so the browserless image above is enough.
+#
+# The RELEASE pipeline does ship it: ci-event-release.yml builds the same workbench and PUTs it to
+# qits-artifacts as a `docs` artifact, served at /platform-docs/@qits/ui-components/. So this step is
+# the rot check it always was, and the released bundle is built from the tag rather than reused from
+# here — no state crosses runs. Docs are published on release only; a push to main produces the npm
+# prerelease and no docs version.
 steps:
     # EVERY BRANCH, no `branches:` key — this is the check every push gets, and it is byte for byte
     # what the single step used to do minus its publish tail.

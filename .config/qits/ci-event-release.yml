@@ -15,8 +15,20 @@
 #
 # `artifacts:` IS A DECLARATION, NOT A REPORT. qits-ci never learns how to publish anything, so it
 # cannot see what the step below pushed; it announces `{repository, version, packageType,
-# packageName}` on the strength of these two lines. Keep them true. The name is the exact registry
+# packageName}` on the strength of these lines. Keep them true. The name is the exact registry
 # name and has to be quoted, since `@` is a reserved YAML indicator.
+#
+# TWO ENTRIES, ONE RUN, TWO EVENTS. The tarball and the workbench are built from the same tree by
+# the same step, so they belong to one release rather than two pipelines — and the repeated name is
+# the point rather than duplication: they are two things arriving at two addresses, one resolvable
+# by `pnpm add` and one readable in a browser. A consumer that wants "the docs are up" triggers on
+# `SoftwareRelease{packageType: docs}`.
+#
+# WHY THIS FILE AND NOT A SoftwareRelease-TRIGGERED ONE. SoftwareRelease is a release pipeline's
+# OUTPUT — qits-ci publishes one per entry above when this run goes green. A docs pipeline hanging
+# off it would mean a second full `pnpm install` and build, gated on the npm publish, to produce
+# something that does not depend on the tarball existing. SCMRelease is what says "the tag is there,
+# go build it", and that is what docs need too.
 #
 # THIS FILE IS INERT UNTIL qits-workspaces PUBLISHES SCMRelease, and it lands first on purpose: the
 # bus is at-most-once with no catch-up and no replay, so a trigger file must be in place before the
@@ -27,6 +39,7 @@ when:
   - repository: { exact: qits-spa-ui-components }
 artifacts:
   - { type: npm, name: "@qits/ui-components" }
+  - { type: docs, name: "@qits/ui-components" }
 steps:
   - image: qits/build-images/node-base:latest
     # The push pipeline's budget. This step installs and builds the same way and runs neither the
@@ -63,11 +76,17 @@ steps:
 
       # PUBLISH-IF-ABSENT, the same guard the push pipeline carries, and it earns its place here for
       # a sharper reason: an event can be redelivered and versions are immutable, so a second run of
-      # one release must go green rather than fight the registry. Ahead of the build because a
-      # redelivery should cost seconds, not a full install.
+      # one release must go green rather than fight the registry.
+      #
+      # IT SETS A FLAG RATHER THAN EXITING, and that changed when this step gained a second artifact.
+      # `exit 0` here was right while npm was the only thing published; with docs below it, a
+      # redelivery whose npm half had landed and whose docs half had NOT would skip the repair and
+      # report green — the release would be permanently half-published with nothing saying so. Each
+      # artifact now answers the already-there question for itself.
+      publish_npm=yes
       if npm view "@qits/ui-components@$version" version >/dev/null 2>&1; then
-        echo "@qits/ui-components@$version is already published — skipping"
-        exit 0
+        echo "@qits/ui-components@$version is already published — skipping the npm publish"
+        publish_npm=no
       fi
 
       pnpm install --frozen-lockfile
@@ -86,4 +105,40 @@ steps:
       # NO --tag, DELIBERATELY: this is the real release, so claiming `latest` is what it is for.
       # The registry allows it because it refuses only a move that goes *backwards* — the push
       # pipeline's `-main.g<sha>` prerelease is the one that must carry an explicit `--tag main`.
-      npm publish ./dist/qits-spa-ui-components
+      if [ "$publish_npm" = yes ]; then
+        npm publish ./dist/qits-spa-ui-components
+      fi
+
+      # THE WORKBENCH, AS THE SECOND DECLARED ARTIFACT. Same tree, same version, same run — see the
+      # `artifacts:` header on why this is not a pipeline of its own.
+      #
+      # It is built HERE rather than reused from the push pipeline because no state crosses runs, let
+      # alone steps: this container cloned the tag itself and has to produce everything it publishes.
+      #
+      # `-C storybook-static .` names every entry `./index.html`. That is the spelling tar produces
+      # and the publish path normalises away; the alternative — `tar -czf … storybook-static` — would
+      # nest the whole site one directory deep and every URL would carry the directory.
+      pnpm build-storybook
+      tar -czf storybook.tgz -C storybook-static .
+
+      # curl, not node's fetch. qits-spa-home's maintenance leg routes an HTTP call through node and
+      # says node-base "promises no curl"; that is no longer true of this image — node-base installs
+      # bash, curl and git explicitly (images/qits-oci/node-base/Dockerfile) — and a 10 MB binary
+      # upload is what curl is for.
+      #
+      # $QITS_DOCS_URL is qits-artifacts' docs root INCLUDING its repository segment, injected into
+      # every step container like the npm and maven roots, so no deployment address is spelled here.
+      #
+      # PUBLISH-IF-ABSENT, the discipline the npm half carries and for the same reason: an event can
+      # be redelivered and a version is immutable, so a second run of one release must go green
+      # rather than fight the store. The store's answer to a republish is 409, so that is the one
+      # status treated as success — everything else fails the release. `-w` prints the code without
+      # `-f` swallowing the body, and the body is the whole diagnostic when it is neither 201 nor 409.
+      status=$(curl -sS -o /tmp/docs-publish.out -w '%{http_code}' \
+        -X PUT --data-binary @storybook.tgz \
+        "$QITS_DOCS_URL/@qits/ui-components/-/$version")
+      case "$status" in
+        201) echo "published docs for @qits/ui-components@$version" ;;
+        409) echo "docs for @qits/ui-components@$version are already published — skipping" ;;
+        *)   echo "docs publish failed: HTTP $status"; cat /tmp/docs-publish.out; exit 1 ;;
+      esac

@@ -10,12 +10,37 @@ Nothing here fetches or stores: a component that needed data would belong to the
 | `QitsButton` | `<qits-button>` | The button. `variant` (`primary`/`secondary`/`ghost`), `size` (`sm`/`md`/`lg`), `type`, `disabled`, `busy`; emits `pressed`. |
 | `QitsBadge` | `<qits-badge>` | A short status word. Required `label`, semantic `tone` (`neutral`/`info`/`success`/`warning`/`danger`). |
 | `QitsCard` | `<qits-card>` | A titled surface. `heading`, `subheading`, `elevated`; projects into the body, and `[qitsCardActions]` into the header. |
+| `QitsPicker` | `<qits-picker>` | Pick one of a list. Required `options` (`{ value: T, label: string }[]`), two-way `value` of `T \| undefined`; `compareWith`, `placeholder`, `disabled`. |
 | `QitsMainLayout` | `<qits-main-layout>` | The application skeleton. `brand`, `links` (defaulting to `QITS_NAV_LINKS`); holds the `<router-outlet />` the app's child routes render into. |
 
 `busy` is separate from `disabled` on purpose: both stop a press, but only `busy` sets
 `aria-busy`, so a host can say "working…" without also claiming the action is unavailable. Tones
 are semantic names rather than colours, which keeps a restyle of the whole system inside this
 repository.
+
+In `QitsPicker` the list **is** the empty state: with nothing chosen the options stand open in the
+flow of the page, and choosing one collapses them into the bar above beside a clear button that
+puts them back. There is no closed-and-empty state, so nobody has to open anything to see what
+they can pick. A rail down the left of the bar and the rows carries a caret: half opacity where
+the pointer or the arrow keys are resting, full opacity once the choice is locked into the bar.
+
+```ts
+type Env = { id: string };
+const environments: QitsPickerOption<Env>[] = [
+  { value: { id: 'dev' }, label: 'Development' },
+  { value: { id: 'prod' }, label: 'Production' },
+];
+```
+```html
+<qits-picker [options]="environments" [(value)]="env" [compareWith]="sameId" />
+```
+
+`value` is a `model`, so `[(value)]` binds both ways and `(valueChange)` alone is the output —
+`T | undefined`, the second half meaning cleared. Values are matched with `Object.is` unless
+`compareWith` says otherwise, which is what objects that crossed a serialisation boundary need. A
+`value` matching no option shows the list, because the component cannot render a label it was not
+given. The rows follow the ARIA listbox pattern: the list is one tab stop, arrows and `Home`/`End`
+move the caret, `Enter` picks.
 
 `QitsMainLayout` is the one component with a peer beyond `@angular/core` and `@angular/common`: it
 renders a `<router-outlet />`, so `@angular/router` is a peer too. Mount it as the root *route*
