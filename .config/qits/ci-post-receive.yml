@@ -14,7 +14,7 @@
 # both see.
 #
 # Neither step declares `docker: true`: publishing an npm package needs nothing but HTTP from this
-# container to qits-artifacts on qits-net, so both keep the ordinary sandbox that an
+# container to qits-platform-artifacts on qits-net, so both keep the ordinary sandbox that an
 # image-publishing step has to give up.
 #
 # The two registry URLs arrive as environment — QITS_NPM_PROXY_URL (the pull-through cache of
@@ -41,7 +41,7 @@
 # a browser rendering, so the browserless image above is enough.
 #
 # The RELEASE pipeline does ship it: ci-event-release.yml builds the same workbench and PUTs it to
-# qits-artifacts as a `docs` artifact, served at /platform-docs/@qits/ui-components/. So this step is
+# qits-platform-artifacts as a `docs` artifact, served at /platform-docs/@qits/ui-components/. So this step is
 # the rot check it always was, and the released bundle is built from the tag rather than reused from
 # here — no state crosses runs. Docs are published on release only; a push to main produces the npm
 # prerelease and no docs version.
@@ -59,7 +59,7 @@ steps:
       cat > ~/.npmrc <<EOF
       registry=${QITS_NPM_PROXY_URL}
       @qits:registry=${QITS_NPM_REGISTRY_URL}
-      # npm-CLI ceremony only — qits-artifacts requires and reads no credential.
+      # npm-CLI ceremony only — qits-platform-artifacts requires and reads no credential.
       ${QITS_NPM_REGISTRY_URL#http:}:_authToken=qits-ci
       EOF
 
@@ -112,7 +112,7 @@ steps:
       cat > ~/.npmrc <<EOF
       registry=${QITS_NPM_PROXY_URL}
       @qits:registry=${QITS_NPM_REGISTRY_URL}
-      # npm-CLI ceremony only — qits-artifacts requires and reads no credential.
+      # npm-CLI ceremony only — qits-platform-artifacts requires and reads no credential.
       ${QITS_NPM_REGISTRY_URL#http:}:_authToken=qits-ci
       EOF
 

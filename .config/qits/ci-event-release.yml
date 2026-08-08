@@ -70,7 +70,7 @@ steps:
       cat > ~/.npmrc <<EOF
       registry=${QITS_NPM_PROXY_URL}
       @qits:registry=${QITS_NPM_REGISTRY_URL}
-      # npm-CLI ceremony only — qits-artifacts requires and reads no credential.
+      # npm-CLI ceremony only — qits-platform-artifacts requires and reads no credential.
       ${QITS_NPM_REGISTRY_URL#http:}:_authToken=qits-ci
       EOF
 
@@ -126,7 +126,7 @@ steps:
       # bash, curl and git explicitly (images/qits-oci/node-base/Dockerfile) — and a 10 MB binary
       # upload is what curl is for.
       #
-      # $QITS_DOCS_URL is qits-artifacts' docs root INCLUDING its repository segment, injected into
+      # $QITS_DOCS_URL is qits-platform-artifacts' docs root INCLUDING its repository segment, injected into
       # every step container like the npm and maven roots, so no deployment address is spelled here.
       #
       # PUBLISH-IF-ABSENT, the discipline the npm half carries and for the same reason: an event can
