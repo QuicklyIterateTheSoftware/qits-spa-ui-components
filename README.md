@@ -124,15 +124,17 @@ of the navigation instead of nowhere.
 `@qits/ui-components` lives in the platform's own npm repository, not on npmjs. A consumer needs
 one `.npmrc` next to its `package.json` — the scope routing, nothing else:
 
-    registry=http://localhost:8081/artifacts/npm/npmjs/     # everything, through the npmjs cache
+    registry=http://localhost:8082/artifacts/npm/npmjs/     # everything, through the npmjs cache
     @qits:registry=http://localhost:8081/artifacts/npm/npm/ # ours
 
     pnpm add @qits/ui-components
 
-Those are the addresses of a local platform as published on the deployment host. Inside qits-net —
-a CI step, another container — the same two roots are `http://qits-artifacts:8080/artifacts/npm/…`,
-and CI writes them from environment rather than reading any file (see
-`.config/qits/ci-post-receive.yml`). Neither registry wants a credential.
+Those are the addresses of a local platform as published on the deployment host, and they are two
+services since the byte-plane split: the cache is `qits-platform-mirror` on 8082, the hosted scope
+is `qits-artifacts` on 8081. Inside qits-net — a CI step, another container — the same two roots
+are `http://qits-platform-mirror:8080/artifacts/npm/npmjs/` and
+`http://qits-artifacts:8080/artifacts/npm/npm/`, and CI writes them from environment rather than
+reading any file (see `.config/qits/ci-post-receive.yml`). Neither registry wants a credential.
 
 The published package is the **prebuilt ng-packagr output** — FESM bundles and type definitions, in
 Angular's partial compilation format. There is nothing to compile on install and no `prepare` hook;
