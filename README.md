@@ -235,15 +235,19 @@ branch, named so nobody mistakes it for a release. The explicit `--tag main` is 
 `npm publish` would move `latest` to a prerelease.
 
 `.config/qits/ci-event-release.yml` is the release pipeline. It reacts to this repository's own
-`SCMRelease`, checks out the annotated tag the release push created, builds it and publishes the
-real version under `latest`. Both publish **if absent** — published versions are immutable and an
-event can be redelivered, so a second run of one release goes green rather than fighting the
-registry.
+release **tag** (`SCMPublishTag`), checks that tag out, builds it and publishes the real version
+under `latest`. Both publish **if absent** — published versions are immutable and an event can be
+redelivered, so a second run of one release goes green rather than fighting the registry.
 
-The release train runs through this library. `SCMRelease` says only that source control has the
-version; `SoftwareRelease` is what qits-ci publishes when the release pipeline goes green, and it
-means the tarball is in the registry. Consumers trigger on the second one, so a bump pipeline can
-install what it was told about (scm-release-split-plan.md).
+The tag is the trigger because it is the durable stamp: a bootstrap replay restores this release by
+pushing the tag alone, and the pipeline re-derives the tarball from it.
+
+The release train runs through this library. A real release also publishes `SCMRelease`, which says
+only that source control has the version; `SoftwareRelease` is what qits-ci publishes where a green
+release run and an `SCMRelease` meet, and it means the tarball is in the registry. Consumers trigger
+on the last one, so a bump pipeline can install what it was told about — and a replay, which has no
+`SCMRelease`, republishes silently and wakes no train (scm-release-split-plan.md,
+bootstrap-replay-plan.md).
 
 The layout no longer carries a list of the platform's doors. It asks the gateway, which derives the
 answer from the routes it actually serves — so a component appearing, moving or being retired is one

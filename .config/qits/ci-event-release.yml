@@ -1,17 +1,26 @@
-# The release pipeline: this repository reacts to its OWN release and publishes the tarball.
+# The release pipeline: this repository reacts to its OWN release TAG and publishes the tarball.
 #
-# THE SELECTION NAMES THIS REPOSITORY, WHICH READS LIKE A LOOP AND IS NOT. `SCMRelease` says only
-# "source control has this version" — qits-workspaces publishes it the instant the release push is
-# accepted, and nothing in this file publishes it. So a repository listening for its own SCMRelease
-# is exactly the release pipeline the split-release design asks each repository to own: the SCM half
-# fires, this half builds the tagged commit and publishes it, and qits-ci turns the green run into
-# one `SoftwareRelease` per entry under `artifacts:` below. The event that could loop is
-# SoftwareRelease, and this file neither listens for it nor publishes it.
+# THE TAG IS THE TRIGGER, AND THAT IS WHAT MAKES A RESTORE WORK. `SCMPublishTag` is the git host's
+# fact that a tag ref landed — nothing more. The tag is also the durable release stamp: it survives
+# on the git host when every event and every container is gone, so a bootstrap replay re-establishes
+# a release by pushing the tag and letting the platform re-derive the rest. This file is what
+# re-derives it here, and it needs no synthetic event to be fabricated for it
+# (bootstrap-replay-plan.md in the wrapper).
 #
-# THAT SPLIT IS THE WHOLE POINT. The two events used to be one, fired at the push, which every
-# consumer read as "the package is in the registry" — with an entire upstream build in the gap. A
-# downstream bump pipeline triggering on SoftwareRelease can now install what it was told about,
-# because this pipeline went green first.
+# THE SELECTION NAMES THIS REPOSITORY, WHICH READS LIKE A LOOP AND IS NOT. Nothing in this file
+# pushes a tag; it only reads one. The event that could loop is `SoftwareRelease`, and this file
+# neither listens for it nor emits it.
+#
+# A REPLAY AND A RELEASE DIFFER BY ONE EVENT, NOT BY THIS PIPELINE. A replay pushes the tag alone; a
+# real release pushes the tag AND has qits-workspaces publish `SCMRelease`. Both run this pipeline
+# and both leave the same bytes in the registry — what only the second one gets is the announcement:
+# qits-ci publishes `SoftwareRelease` where a green run and an `SCMRelease` for that version meet.
+# So a replay republishes silently and wakes no train, and a release still announces after green.
+#
+# THAT ANNOUNCEMENT IS STILL THE SPLIT'S WHOLE POINT. `SoftwareRelease` used to fire at the push,
+# which every consumer read as "the package is in the registry" — with an entire upstream build in
+# the gap. A downstream bump pipeline can install what it was told about, because this pipeline went
+# green first.
 #
 # `artifacts:` IS A DECLARATION, NOT A REPORT. qits-ci never learns how to publish anything, so it
 # cannot see what the step below pushed; it announces `{repository, version, packageType,
@@ -27,16 +36,17 @@
 # WHY THIS FILE AND NOT A SoftwareRelease-TRIGGERED ONE. SoftwareRelease is a release pipeline's
 # OUTPUT — qits-ci publishes one per entry above when this run goes green. A docs pipeline hanging
 # off it would mean a second full `pnpm install` and build, gated on the npm publish, to produce
-# something that does not depend on the tarball existing. SCMRelease is what says "the tag is there,
+# something that does not depend on the tarball existing. The tag is what says "the tree is there,
 # go build it", and that is what docs need too.
 #
-# THIS FILE IS INERT UNTIL qits-workspaces PUBLISHES SCMRelease, and it lands first on purpose: the
-# bus is at-most-once with no catch-up and no replay, so a trigger file must be in place before the
-# event it selects exists. The other order loses a release and looks like a train that quietly did
-# not roll.
-event: SCMRelease
+# THE FILE HAS TO BE IN PLACE BEFORE THE TAG IT SELECTS IS PUSHED: the bus is at-most-once with no
+# catch-up and no replay, so a trigger file arriving after its event loses that release and looks
+# like a train that quietly did not roll.
+event: SCMPublishTag
 when:
-  - repository: { exact: qits-spa-ui-components }
+  # repoId, not repository: the tag event carries the git host's own coordinate, which is the name
+  # this repository is served under.
+  - repoId: { exact: qits-spa-ui-components }
 artifacts:
   - { type: npm, name: "@qits/ui-components" }
   - { type: docs, name: "@qits/ui-components" }
@@ -54,7 +64,14 @@ steps:
       # THE EVENT, READ AS DATA. The payload reaches the container verbatim as one string in
       # $QITS_EVENT_PAYLOAD — there is no per-field projection — and node parses it because
       # node-base carries no jq.
-      version=$(node -p 'JSON.parse(process.env.QITS_EVENT_PAYLOAD).version')
+      #
+      # THE TAG NAME IS THE VERSION, so its shape is checked before anything is built: nothing
+      # upstream vets a tag now that any tag push reaches here, and this string becomes the npm
+      # coordinate and the docs URL. A CalVer is digits and dots.
+      version=$(node -p 'JSON.parse(process.env.QITS_EVENT_PAYLOAD).tagName')
+      case "$version" in
+        ''|*[!0-9.]*) echo "not a CalVer tag: $version" >&2; exit 1 ;;
+      esac
       echo "releasing @qits/ui-components@$version"
 
       # THE TAG IS THE CHECKOUT TARGET, and it is the only reason this run needs one. An
@@ -76,7 +93,9 @@ steps:
 
       # PUBLISH-IF-ABSENT, the same guard the push pipeline carries, and it earns its place here for
       # a sharper reason: an event can be redelivered and versions are immutable, so a second run of
-      # one release must go green rather than fight the registry.
+      # one release must go green rather than fight the registry. Since the trigger is the tag, this
+      # is also what makes a warm bootstrap cheap — the replay re-pushes the tags every time, and a
+      # version the registry already holds costs a probe.
       #
       # IT SETS A FLAG RATHER THAN EXITING, and that changed when this step gained a second artifact.
       # `exit 0` here was right while npm was the only thing published; with docs below it, a
@@ -93,9 +112,10 @@ steps:
       pnpm build
 
       # THE ONE ASSERTION WORTH MAKING. The release commit carries the stamped version in its
-      # manifest, and qits-ci announces the version out of the EVENT — two sources for one number.
-      # If they ever disagreed, the SoftwareRelease would name a version nobody published, which is
-      # precisely the lie the split exists to prevent. Stop here instead.
+      # manifest, and the tag is the coordinate everything else names — two sources for one number.
+      # If they ever disagreed, the tarball published under the tag would carry a different version
+      # inside it, and the SoftwareRelease a real release announces would name one nobody published.
+      # Stop here instead.
       built=$(node -p "require('./dist/qits-spa-ui-components/package.json').version")
       if [ "$built" != "$version" ]; then
         echo "the tag says $version and the built manifest says $built"
