@@ -6,20 +6,22 @@ Standalone components with typed inputs, `OnPush` change detection and self-cont
 Nothing here fetches or stores: a component that needed data would belong to the app that has it.
 
 **One exception, and only one: `QitsMainLayout` asks the platform what the platform contains.** The
-rule holds because it is about *ownership* — a component must not go looking for data some
+rule holds because it is about _ownership_ — a component must not go looking for data some
 application already has. The chrome is the case where no application has it. What the platform
 routes is known to the gateway and to nothing else; each SPA knows only itself. So the navigation
 arrives over `QITS_NAVIGATION`, which `provideQitsNavigation()` answers with one `GET
-/main-navigation`. Everything else in this package still takes what it renders as an input.
+/main-navigation`, and the project list over `QITS_PROJECTS`, which `provideQitsProjects()` answers
+with one `GET /projects/api/projects`. Everything else in this package still takes what it renders
+as an input.
 
-| Component | Selector | What it is |
-|---|---|---|
-| `QitsButton` | `<qits-button>` | The button. `variant` (`primary`/`secondary`/`ghost`), `size` (`sm`/`md`/`lg`), `type`, `disabled`, `busy`; emits `pressed`. |
-| `QitsBadge` | `<qits-badge>` | A short status word. Required `label`, semantic `tone` (`neutral`/`info`/`success`/`warning`/`danger`). |
-| `QitsCard` | `<qits-card>` | A titled surface. `heading`, `subheading`, `elevated`; projects into the body, and `[qitsCardActions]` into the header. |
-| `QitsPicker` | `<qits-picker>` | Pick one of a list. Required `options` (`{ value: T, label: string }[]`), two-way `value` of `T \| undefined`; `compareWith`, `placeholder`, `disabled`. |
-| `QitsMainLayout` | `<qits-main-layout>` | The application skeleton. `brand`, `links` (an override; the navigation comes from `QITS_NAVIGATION`); holds the `<router-outlet />` the app's child routes render into. |
-| `QitsNavSubmenu` | `[qitsNavSubmenu]` | Marks an `<ng-template>` as the sub-menu under the current navigation entry. The layout gives it a box; the app styles what goes in it. |
+| Component        | Selector             | What it is                                                                                                                                                                                                                       |
+| ---------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `QitsButton`     | `<qits-button>`      | The button. `variant` (`primary`/`secondary`/`ghost`), `size` (`sm`/`md`/`lg`), `type`, `disabled`, `busy`; emits `pressed`.                                                                                                     |
+| `QitsBadge`      | `<qits-badge>`       | A short status word. Required `label`, semantic `tone` (`neutral`/`info`/`success`/`warning`/`danger`).                                                                                                                          |
+| `QitsCard`       | `<qits-card>`        | A titled surface. `heading`, `subheading`, `elevated`; projects into the body, and `[qitsCardActions]` into the header.                                                                                                          |
+| `QitsPicker`     | `<qits-picker>`      | Pick one of a list. Required `options` (`{ value: T, label: string }[]`), two-way `value` of `T \| undefined`; `compareWith`, `placeholder`, `disabled`.                                                                         |
+| `QitsMainLayout` | `<qits-main-layout>` | The application skeleton. `brand` (the top-left fallback when no project picker is wired), `links` (an override; the navigation comes from `QITS_NAVIGATION`); holds the `<router-outlet />` the app's child routes render into. |
+| `QitsNavSubmenu` | `[qitsNavSubmenu]`   | Marks an `<ng-template>` as the sub-menu under the current navigation entry. The layout gives it a box; the app styles what goes in it.                                                                                          |
 
 `busy` is separate from `disabled` on purpose: both stop a press, but only `busy` sets
 `aria-busy`, so a host can say "working…" without also claiming the action is unavailable. Tones
@@ -39,6 +41,7 @@ const environments: QitsPickerOption<Env>[] = [
   { value: { id: 'prod' }, label: 'Production' },
 ];
 ```
+
 ```html
 <qits-picker [options]="environments" [(value)]="env" [compareWith]="sameId" />
 ```
@@ -51,19 +54,17 @@ given. The rows follow the ARIA listbox pattern: the list is one tab stop, arrow
 move the caret, `Enter` picks.
 
 `QitsMainLayout` is the one component with a peer beyond `@angular/core` and `@angular/common`: it
-renders a `<router-outlet />`, so `@angular/router` is a peer too. Mount it as the root *route*
+renders a `<router-outlet />`, so `@angular/router` is a peer too. Mount it as the root _route_
 component, never as a tag around your content —
 
 ```ts
-export const routes: Routes = [
-  { path: '', component: QitsMainLayout, children: [/* the app */] },
-];
+export const routes: Routes = [{ path: '', component: QitsMainLayout, children: [/* the app */] }];
 ```
 
 — and the chrome survives navigation while only the outlet changes. Its breakpoint is CSS, not a
 media query in TypeScript: a persistent sidebar from 768px up, a burger in the top bar below it,
 and the burger is the only state the component keeps. The entries are plain `<a href>` paths rather
-than routes, because every destination is a *different* Angular application behind its own base
+than routes, because every destination is a _different_ Angular application behind its own base
 path — `routerLink` would compile and go nowhere. The entry matching the app's own
 `document.baseURI` is marked `aria-current="page"`.
 
@@ -93,7 +94,7 @@ Three states, and no compiled-in list behind any of them:
   "Navigation unavailable" line. `/` is the gateway's own root rather than a registry entry, so it
   is the one destination that cannot go stale.
 
-A fallback list compiled in here would put back the drift this replaced *and hide it*: the chrome
+A fallback list compiled in here would put back the drift this replaced _and hide it_: the chrome
 would sometimes show what the platform routes and sometimes a guess frozen at release time, with
 nothing on screen telling them apart.
 
@@ -101,14 +102,70 @@ nothing on screen telling them apart.
 consulted, which is what lets a story or a spec render the real chrome with no provider anywhere.
 Empty — the default — means "ask".
 
+### The top-left slot is the project picker
+
+```ts
+bootstrapApplication(App, {
+  providers: [
+    provideHttpClient(),
+    provideRouter(routes),
+    provideQitsNavigation(),
+    provideQitsProjects(),
+  ],
+});
+```
+
+Every resource this platform holds — a repository, a run, an artifact, a workspace — belongs to a
+project. Which project is being looked at is therefore the outermost fact about a page, not a filter
+inside one, so it sits **above** the links rather than under one of them, and it replaces the
+wordmark rather than sitting beside it: a name that never changes is worth less than the one control
+every page is subordinate to.
+
+`provideQitsProjects()` issues one `GET /projects/api/projects` and fills a `QitsPicker` in the slot.
+The URL is **absolute** for the same reason `/main-navigation` is — every SPA is served same-origin
+behind the edge, so the browser's session cookie reaches qits-projects with no machine token and no
+CORS pre-flight, and no SPA has to ask its own backend about projects it does not own. Three states,
+told apart on purpose: _loading_, _could not load_, and an answer — an empty list and a failed read
+are different facts and a platform with no projects is a discouraging thing to draw by accident.
+
+With nothing picked the picker is its own list (see `QitsPicker` above), so the bar is as tall as
+the projects there are and the links sit beneath it; picking collapses the list into the pill.
+
+**Which project is current is the application's knowledge, not the library's**, so it comes from
+`QITS_PROJECT_SCOPE`:
+
+```ts
+export interface QitsProjectScope {
+  readonly projectId: Signal<string | undefined>;
+  select(projectId: string | undefined): void; // expected to navigate
+}
+```
+
+`provideQitsProjects()` installs `QueryParamProjectScope`, which carries the pick in `?project=` on
+whatever page the reader is already on — the path is kept, so picking a project is not also a
+departure. That is the scope for an app whose own addresses do not name a project yet: the pick
+lands in the URL and its pages ignore it until each one is scoped.
+
+An app whose addresses _do_ name a project overrides it by providing `QITS_PROJECT_SCOPE` **after**
+the call — qits-spa-projects does, because there the project id is the first path segment and
+`?project=` would be a second, weaker spelling of a fact the path already carries. There is
+deliberately no setter that only remembers: `select` navigates, so the URL stays the single
+statement of what is on screen and the back button cannot disagree with the pill.
+
+Both halves are required to render the picker. With a list but no scope the slot keeps the wordmark:
+a control that can neither say what is open nor act on a pick is worse in the most prominent place
+in the chrome than the name it would have replaced. An app that provides neither is unchanged.
+
+`provideQitsProjectList([…])` answers the same contract from a literal — specs, stories, an
+`ng serve` with no platform in front of it — and takes `{ failed: true }` for the unavailable state.
+
 ### The sub-menu
 
 An application can hang its own menu under its own entry: a documentation tree, a version picker.
 Declare it **in the app shell, beside the `<router-outlet />`** —
 
 ```html
-<ng-template qitsNavSubmenu><app-doc-tree /></ng-template>
-<router-outlet />
+<ng-template qitsNavSubmenu><app-doc-tree /></ng-template> <router-outlet />
 ```
 
 — and never inside a page. Getting that wrong is silent: a page's declaration is destroyed and
@@ -142,13 +199,13 @@ consumers install a tarball like any other dependency.
 
 ### Pinning a `main` build takes an exact version, never a caret
 
-A build off `main` is published as `<last released version>-main.g<sha7>` (see *Releasing*), and a
+A build off `main` is published as `<last released version>-main.g<sha7>` (see _Releasing_), and a
 consumer reaching for one ahead of its release must spell it **exactly**:
 
     "@qits/ui-components": "2026.806.184725-main.gc03ad30"     # yes
     "@qits/ui-components": "^2026.806.184725-main.gc03ad30"    # no
 
-The caret range admits `2026.806.184725` as well — a prerelease sorts *below* the release it is
+The caret range admits `2026.806.184725` as well — a prerelease sorts _below_ the release it is
 named after, so npm resolves the release and never mentions the prerelease again. What arrives is
 the build the caller was trying to get ahead of, and the failure lands somewhere else entirely:
 `error TS2305: Module '@qits/ui-components' has no exported member 'QitsPicker'`.
@@ -158,7 +215,7 @@ build — but only because no stable release of that version existed yet for the
 The moment one did, every caret pin silently moved backwards.
 
 A pin like this is temporary by nature. Once the release lands, the range goes back to an ordinary
-`^<version>`, and the maintenance-hop pipelines described in *Releasing* write exactly that.
+`^<version>`, and the maintenance-hop pipelines described in _Releasing_ write exactly that.
 
 Then, in a standalone component:
 
@@ -176,7 +233,9 @@ import { QitsBadge, QitsButton, QitsCard } from '@qits/ui-components';
     </qits-card>
   `,
 })
-export class RunSummary { /* … */ }
+export class RunSummary {
+  /* … */
+}
 ```
 
 ## Development
@@ -189,7 +248,7 @@ export class RunSummary { /* … */ }
     pnpm build-storybook # the same, static, into storybook-static/
 
 `pnpm build` runs `scripts/check-exports.mjs` over the output: it is the manifest ng-packagr
-*writes* that gets published, so the check reads that one — the package name, the version against
+_writes_ that gets published, so the check reads that one — the package name, the version against
 `projects/qits-spa-ui-components/package.json`, the absence of a `private` flag, the peer ranges,
 and that every path in `exports` exists on disk. A publish that would have failed after a green
 pipeline fails at build time instead.
@@ -206,7 +265,7 @@ until a build image ships a browser, that target is a local-only affair and CI s
 
 ### Storybook
 
-Storybook is the place to *look* at a component, which is the one thing a jsdom spec cannot do.
+Storybook is the place to _look_ at a component, which is the one thing a jsdom spec cannot do.
 Both targets live in `angular.json` and run through **`@storybook/angular-vite`**: this workspace
 builds on Vite under Angular 21, and the webpack-era `@storybook/angular` would mean a second
 toolchain disagreeing with the first. The config is `projects/qits-spa-ui-components/.storybook`.

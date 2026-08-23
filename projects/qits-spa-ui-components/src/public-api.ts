@@ -14,3 +14,16 @@ export {
 } from './lib/navigation';
 export type { QitsNavigation, QitsNavigationSource, QitsNavLink } from './lib/navigation';
 export { QitsNavSubmenu, QitsNavSubmenuSlot } from './lib/nav-submenu';
+export {
+  provideQitsProjects,
+  provideQitsProjectList,
+  QITS_PROJECTS,
+  QITS_PROJECTS_URL,
+} from './lib/projects';
+export type { QitsProject, QitsProjectEntries, QitsProjectsSource } from './lib/projects';
+export {
+  QITS_PROJECT_QUERY_PARAM,
+  QITS_PROJECT_SCOPE,
+  QueryParamProjectScope,
+} from './lib/project-scope';
+export type { QitsProjectScope } from './lib/project-scope';
