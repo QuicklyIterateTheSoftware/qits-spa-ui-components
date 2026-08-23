@@ -13,6 +13,8 @@ import { QitsCard } from './card';
 import { QitsMainLayout } from './main-layout';
 import { QitsNavSubmenu } from './nav-submenu';
 import { provideQitsNavigationLinks, QITS_NAVIGATION, type QitsNavLink } from './navigation';
+import { QITS_PROJECT_SCOPE, QueryParamProjectScope } from './project-scope';
+import { provideQitsProjectList, QITS_PROJECTS, type QitsProject } from './projects';
 
 /** Stand-in for whatever an app routes into the layout. */
 @Component({
@@ -37,6 +39,13 @@ const DEMO_LINKS: readonly QitsNavLink[] = [
   { label: 'Deployments', href: '/platform-deployments/' },
   { label: 'Artifacts', href: '/artifacts/' },
   { label: 'Projects', href: '/projects/' },
+];
+
+/** What qits-projects would answer with, for the stories that put the picker in the brand slot. */
+const DEMO_PROJECTS: readonly QitsProject[] = [
+  { id: 'payments', name: 'Payments' },
+  { id: 'billing', name: 'Billing' },
+  { id: 'platform-infra', name: 'Platform infrastructure' },
 ];
 
 // The layout hosts a `<router-outlet />`, which needs a router in scope, and it asks
@@ -138,6 +147,68 @@ export const WithSubmenu: Story = {
       </ng-template>
     `,
   }),
+};
+
+/**
+ * The top-left slot as the platform actually ships it: the project picker where the wordmark is in
+ * every story above. Every resource on this platform belongs to a project, so which one is open is
+ * the outermost fact about a page — above the links, because it scopes them.
+ *
+ * With nothing picked the picker *is* its own list, so the bar is as tall as the projects there
+ * are and the links sit under it; picking one collapses the list into the pill and the bar shrinks
+ * back to a row. `provideQitsProjects()` is the real wiring — one `GET /projects/api/projects` —
+ * and `provideQitsProjectList` is the same contract answered from a literal, which is what a
+ * workbench with no platform behind it needs.
+ */
+export const WithProjectPicker: Story = {
+  name: 'With the project picker',
+  decorators: [
+    applicationConfig({
+      providers: [
+        provideRouter([{ path: '**', component: Child }]),
+        provideQitsNavigationLinks(DEMO_LINKS),
+        provideQitsProjectList(DEMO_PROJECTS),
+      ],
+    }),
+  ],
+};
+
+/**
+ * The list has not arrived. The slot says so rather than showing an empty picker, which would read
+ * as a platform holding no projects — a different fact, and a discouraging one to show by accident.
+ */
+export const ProjectsLoading: Story = {
+  name: 'Projects loading',
+  decorators: [
+    applicationConfig({
+      providers: [
+        provideRouter([]),
+        provideQitsNavigationLinks(DEMO_LINKS),
+        {
+          provide: QITS_PROJECTS,
+          useValue: { projects: signal(undefined), failed: signal(false) },
+        },
+        { provide: QITS_PROJECT_SCOPE, useClass: QueryParamProjectScope },
+      ],
+    }),
+  ],
+};
+
+/**
+ * The read failed. Again distinct from an empty platform, and again said in words: the reader is
+ * looking at a chrome that cannot currently tell them what exists.
+ */
+export const ProjectsUnavailable: Story = {
+  name: 'Projects unavailable',
+  decorators: [
+    applicationConfig({
+      providers: [
+        provideRouter([]),
+        provideQitsNavigationLinks(DEMO_LINKS),
+        provideQitsProjectList([], { failed: true }),
+      ],
+    }),
+  ],
 };
 
 /**

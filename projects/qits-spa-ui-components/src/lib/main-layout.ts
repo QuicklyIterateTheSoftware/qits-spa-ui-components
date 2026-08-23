@@ -12,6 +12,9 @@ import { RouterOutlet } from '@angular/router';
 
 import { QitsNavSubmenuSlot } from './nav-submenu';
 import { QITS_NAVIGATION, type QitsNavLink } from './navigation';
+import { QitsPicker, type QitsPickerOption } from './picker';
+import { QITS_PROJECT_SCOPE } from './project-scope';
+import { QITS_PROJECTS } from './projects';
 
 /** `/ci` and `/ci/` name the same application; comparing normalised paths keeps the match honest. */
 function toDirectoryPath(href: string): string {
@@ -37,11 +40,19 @@ function toDirectoryPath(href: string): string {
  * Under the entry that is this application, an app can hang a sub-menu of its own —
  * `<ng-template qitsNavSubmenu>` in the shell, see {@link QitsNavSubmenu}. The layout gives it a
  * bare block and styles nothing inside it.
+ *
+ * **The top-left slot is the project picker, not a wordmark.** Every resource this platform holds —
+ * a repository, a run, an artifact, a workspace — belongs to a project, so which project is being
+ * looked at is the outermost thing about a page and not a filter inside one of them. It sits above
+ * the links because it scopes them, and it replaces the brand rather than sitting beside it because
+ * a name that never changes is worth less than the one control every page is subordinate to. An app
+ * that provides no `QITS_PROJECTS` still gets `brand()` there, which is what keeps this a slot
+ * rather than a requirement.
  */
 @Component({
   selector: 'qits-main-layout',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterOutlet, NgTemplateOutlet],
+  imports: [RouterOutlet, NgTemplateOutlet, QitsPicker],
   template: `
     <div class="qits-layout">
       <header class="qits-layout-bar">
@@ -55,7 +66,29 @@ function toDirectoryPath(href: string): string {
         >
           <span class="qits-layout-burger-glyph" aria-hidden="true">☰</span>
         </button>
-        <span class="qits-layout-brand">{{ brand() }}</span>
+
+        @if (hasPicker) {
+          <div class="qits-layout-project">
+            @if (projectsPending()) {
+              <p class="qits-layout-project-note">Loading projects…</p>
+            } @else if (projectsFailed()) {
+              <p class="qits-layout-project-note qits-layout-project-error" role="alert">
+                Could not load projects.
+              </p>
+            } @else {
+              <qits-picker
+                [options]="projectOptions()"
+                [value]="projectId()"
+                (valueChange)="onProject($event)"
+                ariaLabel="Project"
+                placeholder="Pick a project"
+                emptyLabel="No projects yet"
+              />
+            }
+          </div>
+        } @else {
+          <span class="qits-layout-brand">{{ brand() }}</span>
+        }
       </header>
 
       <nav
@@ -134,13 +167,18 @@ function toDirectoryPath(href: string): string {
       grid-column: 1;
       grid-row: 1;
       display: flex;
-      align-items: center;
+      /* Top, not centre: with nothing picked the picker *is* its own list, so this row is as tall
+         as the projects there are. Centring would hang the burger halfway down that list. */
+      align-items: flex-start;
       gap: 10px;
       padding: 10px 16px;
       background: #f9fafb;
       border-bottom: 1px solid #e5e7eb;
     }
     .qits-layout-brand {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
       font-size: 15px;
       font-weight: 600;
       letter-spacing: 0.01em;
@@ -149,6 +187,10 @@ function toDirectoryPath(href: string): string {
       font: inherit;
       font-size: 18px;
       line-height: 1;
+      display: inline-flex;
+      align-items: center;
+      /* Matched to the picker's pill so the two line up on the first row of a bar that may be tall. */
+      min-height: 34px;
       padding: 2px 8px;
       background: transparent;
       color: inherit;
@@ -159,6 +201,25 @@ function toDirectoryPath(href: string): string {
     .qits-layout-burger:hover {
       background: #f3f4f6;
     }
+    /* The picker takes the width the wordmark did not need, and caps its own height rather than the
+       bar's: a platform with fifty projects must not push the navigation off the screen, and the
+       bar is not the element that scrolls. */
+    .qits-layout-project {
+      flex: 1;
+      min-width: 0;
+      max-height: 60vh;
+      overflow-y: auto;
+    }
+    .qits-layout-project-note {
+      margin: 0;
+      padding: 8px 2px;
+      font-size: 13px;
+      color: #6b7280;
+    }
+    .qits-layout-project-error {
+      color: #b91c1c;
+    }
+
     .qits-layout-nav {
       grid-column: 1;
       grid-row: 2;
@@ -285,6 +346,28 @@ export class QitsMainLayout {
   protected readonly submenu = inject(QitsNavSubmenuSlot).template;
 
   /**
+   * The projects to offer, and which one is current — both optional, and both absent is the state
+   * every SPA was in before the picker existed: the brand text, and nothing else in the slot.
+   *
+   * They are separate injections because they answer different questions and come from different
+   * places: the *list* is the platform's (one read of qits-projects, the same everywhere), while
+   * *which one* is the application's, because only the application knows whether its own addresses
+   * name a project. `provideQitsProjects()` supplies both, the second as a `?project=` default.
+   */
+  private readonly projects = inject(QITS_PROJECTS, { optional: true });
+  private readonly scope = inject(QITS_PROJECT_SCOPE, { optional: true });
+
+  /**
+   * Whether the slot is the picker rather than the wordmark. Read once, not computed: an app either
+   * wired the picker up at bootstrap or it did not, and the slot must not swap under a reader.
+   *
+   * Both halves are required. A picker with a list but no scope could show what exists and neither
+   * say which is open nor act on a pick — a dead control in the most prominent place in the chrome,
+   * which is worse than the brand text it would have replaced.
+   */
+  protected readonly hasPicker = this.projects !== null && this.scope !== null;
+
+  /**
    * Which link is *this* application. Read once from the document's base URI rather than from the
    * router, because the thing being matched is the app's own mount point, not its current route —
    * and because a base URI exists on a server too.
@@ -333,6 +416,34 @@ export class QitsMainLayout {
    * most once either way.
    */
   protected readonly hasCurrent = computed(() => this.navLinks().some((link) => link.current));
+
+  /** Nothing has answered with a project list yet. */
+  protected readonly projectsPending = computed(() => this.projects?.projects() === undefined);
+
+  /** The read failed. Said out loud rather than drawn as an empty list, which would be a lie. */
+  protected readonly projectsFailed = computed(() => this.projects?.failed() ?? false);
+
+  protected readonly projectOptions = computed<QitsPickerOption<string>[]>(() =>
+    (this.projects?.projects() ?? []).map((project) => ({
+      value: project.id,
+      label: project.name,
+    })),
+  );
+
+  /**
+   * The project on screen, as the scope reports it — never stored here.
+   *
+   * An id the list does not contain is passed through rather than blanked: `QitsPicker` resolves a
+   * value against its options and shows the list again when nothing matches, so a URL naming a
+   * project that no longer exists lands on the choices instead of a pill with no label.
+   */
+  protected readonly projectId = computed(() => this.scope?.projectId());
+
+  protected onProject(projectId: string | undefined): void {
+    this.scope?.select(projectId);
+    // A pick is a navigation, so the mobile panel must not be left open on top of where it went.
+    this.closeNav();
+  }
 
   protected toggleNav(): void {
     this.navOpen.update((open) => !open);
