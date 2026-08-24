@@ -703,7 +703,9 @@ export class QitsMainLayout {
   ): QitsNavRow[] {
     const rows: QitsNavRow[] = [];
     for (const entry of this.appLinks.entries(slot)) {
-      const href = this.appLinks.href(entry.app, '', scope);
+      // The entry's subpath is the view it opens — '' is the application's root, which is what
+      // every entry was before subpaths existed.
+      const href = this.appLinks.href(entry.app, entry.subpath, scope);
       if (!href) continue;
       rows.push({
         kind: 'link',

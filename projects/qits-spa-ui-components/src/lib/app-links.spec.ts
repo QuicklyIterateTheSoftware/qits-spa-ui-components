@@ -50,7 +50,20 @@ describe('QitsAppLinks', () => {
           origin: 'https://dev.example.com',
           position: 3,
         },
+        // A subpathed entry: it opens a view of the projects app, not its root.
+        {
+          app: 'qits-projects',
+          label: 'Api Docs',
+          host: 'projects',
+          path: '/projects',
+          origin: 'https://projects.dev.example.com',
+          position: 6,
+          subpath: 'api-docs',
+        },
       ],
+    },
+    applications: {
+      'qits-ci': { apiDocs: '/ci/q/swagger-ui' },
     },
   };
 
@@ -87,6 +100,7 @@ describe('QitsAppLinks', () => {
       'Docs',
       'CI',
       'Artifacts',
+      'Api Docs',
     ]);
     expect(appLinks.entries('platform')).toEqual([]);
   });
@@ -200,5 +214,27 @@ describe('QitsAppLinks', () => {
     const appLinks = links('https://ci.dev.example.com');
     await TestBed.inject(Router).navigateByUrl('/artifacts/images');
     expect(appLinks.isCurrent(entry(appLinks, 'qits-artifacts'), {})).toBe(false);
+  });
+
+  it('spells an api-docs url from the environment origin, and nothing where none was published', () => {
+    const appLinks = links();
+    // The environment origin on purpose: it serves every application's routes, and /<seg>/q/…
+    // never moves off it — so the URL works before, during and after a host flip.
+    expect(appLinks.apiDocsUrl('qits-ci')).toBe('https://dev.example.com/ci/q/swagger-ui');
+    expect(appLinks.apiDocsUrl('qits-docs')).toBeUndefined();
+    expect(appLinks.apiDocsUrl('qits-nothing')).toBeUndefined();
+  });
+
+  it('marks a subpathed entry current only inside its view', async () => {
+    const appLinks = links('https://projects.dev.example.com');
+    const scope = { project: 'qits', category: 'services', repository: 'qits-ci' } as const;
+    const apiDocs = entry(appLinks, 'qits-projects');
+    expect(apiDocs.subpath).toBe('api-docs');
+
+    await TestBed.inject(Router).navigateByUrl('/qits/services/qits-ci/api-docs');
+    expect(appLinks.isCurrent(apiDocs, scope)).toBe(true);
+
+    await TestBed.inject(Router).navigateByUrl('/qits/services/qits-ci/');
+    expect(appLinks.isCurrent(apiDocs, scope)).toBe(false);
   });
 });

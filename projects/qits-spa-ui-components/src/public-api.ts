@@ -16,6 +16,7 @@ export {
   toNavTree,
 } from './lib/navigation';
 export type {
+  QitsNavApplication,
   QitsNavEntry,
   QitsNavEntryBody,
   QitsNavigation,

@@ -264,6 +264,16 @@ describe('QitsMainLayout', () => {
             origin: 'https://docs.dev.example.com',
             position: 1,
           },
+          // A subpathed entry: it opens a view of the projects app under the scope, not its root.
+          {
+            app: 'qits-projects',
+            label: 'Api Docs',
+            host: 'projects',
+            path: '/projects',
+            origin: PROJECTS_ORIGIN,
+            position: 6,
+            subpath: 'api-docs',
+          },
         ],
         'libs.details': [
           {
@@ -395,6 +405,7 @@ describe('QitsMainLayout', () => {
         'Docs',
         'CI',
         'Artifacts',
+        'Api Docs',
         'qits-projects',
         'Qits-web',
         'qits-eventstream',
@@ -410,8 +421,24 @@ describe('QitsMainLayout', () => {
         'Docs',
         'CI',
         'Artifacts',
+        'Api Docs',
       ]);
       expect(current(fixture)).toEqual(['qits-ci']);
+    });
+
+    it('addresses a subpathed entry at its view under the scope, and marks it the page there', async () => {
+      const fixture = await renderTree({
+        url: '/qits/services/qits-ci/api-docs',
+        browserOrigin: PROJECTS_ORIGIN,
+      });
+
+      // The subpath rides after the scope: the entry opens a view of its app for this repository.
+      expect(
+        links(fixture)
+          .find((a) => a.textContent?.trim() === 'Api Docs')
+          ?.getAttribute('href'),
+      ).toBe(`${PROJECTS_ORIGIN}/qits/services/qits-ci/api-docs`);
+      expect(current(fixture)).toEqual(['Api Docs']);
     });
 
     it('marks the entry whose host the reader is on, inside the repository in scope', async () => {
