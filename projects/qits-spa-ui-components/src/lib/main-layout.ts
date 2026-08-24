@@ -649,7 +649,11 @@ export class QitsMainLayout {
     const origin = this.projectsOrigin();
     const rows: QitsNavRow[] = [];
     for (const category of QITS_CATEGORIES) {
-      const inGroup = all.filter((repository) => repository.category === category);
+      // By name, not in the order the API answered: a sidebar a reader scans has to be predictable,
+      // and case is not a fact about a repository worth ordering by.
+      const inGroup = all
+        .filter((repository) => repository.category === category)
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
       if (inGroup.length === 0) continue;
       rows.push({ kind: 'heading', key: `heading:${category}`, label: category.toUpperCase() });
       for (const repository of inGroup) {

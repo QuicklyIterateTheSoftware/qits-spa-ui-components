@@ -283,9 +283,11 @@ describe('QitsMainLayout', () => {
       { id: 'p2', slug: 'payments', name: 'Payments' },
     ];
 
+    /** Deliberately not in name order, and not in one case: the sidebar sorts, the API does not. */
     const REPOSITORIES: readonly QitsRepository[] = [
-      { id: 'r1', name: 'qits-ci', category: 'services' },
       { id: 'r2', name: 'qits-projects', category: 'services' },
+      { id: 'r5', name: 'Qits-web', category: 'services' },
+      { id: 'r1', name: 'qits-ci', category: 'services' },
       { id: 'r3', name: 'qits-eventstream', category: 'libs' },
       { id: 'r4', name: 'qits-qits', category: undefined },
     ];
@@ -343,6 +345,7 @@ describe('QitsMainLayout', () => {
         'Workspaces',
         'qits-ci',
         'qits-projects',
+        'Qits-web',
         'qits-eventstream',
         'Events',
         'Overview',
@@ -350,6 +353,14 @@ describe('QitsMainLayout', () => {
       ]);
       // A repository of an archetype this library does not group is left out rather than guessed at.
       expect(labels(fixture)).not.toContain('qits-qits');
+    });
+
+    /** A reader scans this list; the order an API answered in is not one they can predict. */
+    it('lists the repositories of a group by name, whatever case they are in', async () => {
+      const fixture = await renderTree({ url: '/qits/' });
+      const names = labels(fixture).filter((label) => label?.toLowerCase().startsWith('qits-'));
+
+      expect(names).toEqual(['qits-ci', 'qits-projects', 'Qits-web', 'qits-eventstream']);
     });
 
     it('addresses every row on the host that serves it', async () => {
@@ -385,6 +396,7 @@ describe('QitsMainLayout', () => {
         'CI',
         'Artifacts',
         'qits-projects',
+        'Qits-web',
         'qits-eventstream',
         'Events',
         'Overview',
@@ -734,7 +746,8 @@ describe('QitsMainLayout', () => {
       optionRows(fixture)[0].click();
       await settle(fixture);
 
-      expect(router.url.replace(/\/$/, '')).toBe('/one');
+      // No trailing slash: `/one/` would parse as a second, empty segment and match no `:project`.
+      expect(router.url).toBe('/one');
       expect(pill(fixture)).toBe('One');
     });
 

@@ -1,7 +1,7 @@
 import { provideLocationMocks } from '@angular/common/testing';
 import { ApplicationRef, Component, DOCUMENT } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { provideRouter, Router } from '@angular/router';
+import { PRIMARY_OUTLET, provideRouter, Router } from '@angular/router';
 
 import { QITS_BROWSER_ORIGIN } from './app-links';
 import { provideQitsNavigationTree } from './navigation';
@@ -102,10 +102,10 @@ describe('UrlScope', () => {
     }
   }
 
-  /** The router drops a trailing slash when it serialises; the scope does not care either way. */
-  function path(router: Router): string {
-    const url = router.url.replace(/\/$/, '');
-    return url === '' ? '/' : url;
+  /** What the router's own serialiser makes of an address — the thing route matching sees. */
+  function segments(router: Router): string[] {
+    const primary = router.parseUrl(router.url).root.children[PRIMARY_OUTLET];
+    return (primary?.segments ?? []).map((segment) => segment.path);
   }
 
   const NAVIGATION = {
@@ -197,7 +197,10 @@ describe('UrlScope', () => {
     scope.select('qits');
     await settle();
 
-    expect(path(router)).toBe('/qits');
+    expect(router.url).toBe('/qits');
+    // ONE segment. `/qits/` parses as `qits` plus an empty one, which matches no `:project` route
+    // and lands every pick on the application's `**` instead.
+    expect(segments(router)).toEqual(['qits']);
     expect(scope.scope()).toEqual({ project: 'qits' });
     // It stayed: this application serves the project itself.
     expect(doc.assigned).toEqual([]);
@@ -212,7 +215,8 @@ describe('UrlScope', () => {
     scope.select(undefined);
     await settle();
 
-    expect(path(router)).toBe('/');
+    expect(router.url).toBe('/');
+    expect(segments(router)).toEqual([]);
     expect(scope.scope()).toEqual({});
   });
 
