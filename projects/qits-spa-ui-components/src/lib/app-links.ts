@@ -72,6 +72,22 @@ export class QitsAppLinks {
   }
 
   /**
+   * Where an application's browsable API document lives, as a full URL — the environment origin
+   * plus the path the application declared. `undefined` is a real answer with two causes a caller
+   * treats alike: the application publishes no document, or the platform has not answered yet.
+   *
+   * The environment origin on purpose, never the application's own host: it serves every
+   * application's routes and `/<seg>/q/…` never moves off it, so the URL works before, during and
+   * after a host flip.
+   */
+  apiDocsUrl(app: string): string | undefined {
+    const path = this.source?.tree()?.apiDocs[app];
+    const environment = this.environmentOrigin();
+    if (!path || !environment) return undefined;
+    return join(environment, path);
+  }
+
+  /**
    * A link into another application: its origin, the scope path, then `path`.
    *
    * An application with **no host of its own** is still served under the environment origin at its
@@ -109,11 +125,14 @@ export class QitsAppLinks {
    * An application with no host of its own is asked the same question in its own terms: it is
    * current where the reader is on the environment origin, under its segment. The scope plays no
    * part there, because such an application has no scoped address to be inside.
+   *
+   * An entry with a subpath is current only inside that view — the scope path plus the subpath —
+   * which with the empty subpath reduces exactly to the scope test every entry always had.
    */
   isCurrent(entry: QitsNavEntry, scope?: QitsScope): boolean {
     const host = hostOf(entry.origin);
     if (!host || host !== hostOf(this.browserOrigin)) return false;
     if (!entry.host) return entry.path !== '' && this.currentPath().startsWith(`${entry.path}/`);
-    return this.currentPath().startsWith(scopePath(scope));
+    return this.currentPath().startsWith(join(scopePath(scope), entry.subpath));
   }
 }

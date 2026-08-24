@@ -55,6 +55,12 @@ export interface QitsNavLink {
  *
  * `path` is the application's own route prefix (`/ci`), normalised to a leading slash and no
  * trailing one. A hosted application has it too; it is simply not needed to address one.
+ *
+ * `subpath` is the view this entry opens, appended after the scope the sidebar composes
+ * (`/<project>/<category>/<repository>/api-docs`). Normalised to no slash at either end, and `''`
+ * for the entry every application declared before the field existed: the application's root under
+ * that same scope. It is deliberately NOT `path` — that field is the app's route prefix on the
+ * environment origin, and this one is a route segment inside the app.
  */
 export interface QitsNavEntry {
   readonly app: string;
@@ -64,6 +70,7 @@ export interface QitsNavEntry {
   readonly path: string;
   readonly position: number;
   readonly slot: QitsNavSlot;
+  readonly subpath: string;
 }
 
 /** One entry as the platform serves it: {@link QitsNavEntry} without the slot it is filed under. */
@@ -74,6 +81,16 @@ export interface QitsNavEntryBody {
   readonly origin: string;
   readonly path?: string;
   readonly position?: number;
+  readonly subpath?: string | null;
+}
+
+/**
+ * Per-application metadata the platform serves beside the slots — facts about an application
+ * rather than placements of it. `apiDocs` is where its browsable API document lives, as a path
+ * under the environment origin (`/ci/q/swagger-ui`).
+ */
+export interface QitsNavApplication {
+  readonly apiDocs?: string | null;
 }
 
 /**
@@ -86,6 +103,8 @@ export interface QitsNavigation {
   /** The environment's own origin — where an application without a host of its own is served. */
   readonly origin?: string;
   readonly slots?: Readonly<Partial<Record<QitsNavSlot, readonly QitsNavEntryBody[]>>>;
+  /** Per-application metadata, keyed by application name — see {@link QitsNavApplication}. */
+  readonly applications?: Readonly<Record<string, QitsNavApplication | null>>;
   /** The flat shape, from an edge that does not know about slots. */
   readonly links?: readonly QitsNavLink[];
 }
@@ -103,6 +122,12 @@ export interface QitsNavTree {
   readonly entries: readonly QitsNavEntry[];
   /** Where the environment itself is served, if the platform said. */
   readonly environmentOrigin: string | undefined;
+  /**
+   * Each application's api-docs path, by application name, normalised to a leading slash. Only
+   * applications the platform said publish one appear — absence is "this application documents no
+   * HTTP surface", which is a real answer a page renders.
+   */
+  readonly apiDocs: Readonly<Record<string, string>>;
   /** The flat links of a pre-slots answer, and `undefined` whenever slots were served. */
   readonly legacy: readonly QitsNavLink[] | undefined;
 }
@@ -138,13 +163,31 @@ export const QITS_NAVIGATION = new InjectionToken<QitsNavigationSource>('QITS_NA
 export const QITS_NAVIGATION_URL = '/main-navigation';
 
 /** The stranded answer: nothing to show, and no legacy list to fall back on either. */
-const NOTHING: QitsNavTree = { entries: [], environmentOrigin: undefined, legacy: [] };
+const NOTHING: QitsNavTree = { entries: [], environmentOrigin: undefined, apiDocs: {}, legacy: [] };
 
 /** `/ci`, from `ci`, `/ci` or `/ci/` — a prefix to join to, with nothing to guess at either end. */
 function toPathPrefix(path: string | undefined): string {
   if (!path) return '';
   const leading = path.startsWith('/') ? path : `/${path}`;
   return leading.replace(/\/+$/, '');
+}
+
+/** `api-docs`, from `api-docs`, `/api-docs` or `api-docs/` — a segment to append after a scope. */
+function toSubpath(subpath: string | null | undefined): string {
+  return subpath ? subpath.replace(/^\/+/, '').replace(/\/+$/, '') : '';
+}
+
+/** The api-docs paths the platform served, dropping entries a page could not act on. */
+function toApiDocs(
+  applications: QitsNavigation['applications'],
+): Readonly<Record<string, string>> {
+  const paths: Record<string, string> = {};
+  for (const [app, metadata] of Object.entries(applications ?? {})) {
+    const path = metadata?.apiDocs;
+    if (!app || !path) continue;
+    paths[app] = path.startsWith('/') ? path : `/${path}`;
+  }
+  return paths;
 }
 
 /** Entries first by position, then by label — so two entries at one position still have an order. */
@@ -160,7 +203,12 @@ function inOrder(a: QitsNavEntry, b: QitsNavEntry): number {
 export function toNavTree(body: QitsNavigation | null | undefined): QitsNavTree {
   const slots = body?.slots;
   if (!slots) {
-    return { entries: [], environmentOrigin: body?.origin, legacy: body?.links ?? [] };
+    return {
+      entries: [],
+      environmentOrigin: body?.origin,
+      apiDocs: toApiDocs(body?.applications),
+      legacy: body?.links ?? [],
+    };
   }
   const entries: QitsNavEntry[] = [];
   for (const slot of QITS_NAV_SLOTS) {
@@ -174,10 +222,16 @@ export function toNavTree(body: QitsNavigation | null | undefined): QitsNavTree 
         path: toPathPrefix(entry.path),
         position: entry.position ?? 0,
         slot,
+        subpath: toSubpath(entry.subpath),
       });
     }
   }
-  return { entries: entries.sort(inOrder), environmentOrigin: body?.origin, legacy: undefined };
+  return {
+    entries: entries.sort(inOrder),
+    environmentOrigin: body?.origin,
+    apiDocs: toApiDocs(body?.applications),
+    legacy: undefined,
+  };
 }
 
 /**

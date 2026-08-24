@@ -149,8 +149,64 @@ describe('toNavTree', () => {
     expect(toNavTree(undefined)).toEqual({
       entries: [],
       environmentOrigin: undefined,
+      apiDocs: {},
       legacy: [],
     });
+  });
+
+  it('normalises the subpath to no slash at either end, and its absence to the empty string', () => {
+    const tree = toNavTree({
+      slots: {
+        'services.details': [
+          {
+            app: 'a',
+            label: 'A',
+            origin: 'https://a.example.com',
+            position: 1,
+            subpath: 'api-docs',
+          },
+          {
+            app: 'b',
+            label: 'B',
+            origin: 'https://b.example.com',
+            position: 2,
+            subpath: '/api-docs/',
+          },
+          { app: 'c', label: 'C', origin: 'https://c.example.com', position: 3, subpath: null },
+          { app: 'd', label: 'D', origin: 'https://d.example.com', position: 4 },
+        ],
+      },
+    });
+    expect(tree.entries.map((entry) => entry.subpath)).toEqual(['api-docs', 'api-docs', '', '']);
+  });
+
+  it('reads the applications object into api-docs paths, dropping what a page could not act on', () => {
+    const tree = toNavTree({
+      origin: 'https://dev.example.com',
+      slots: {},
+      applications: {
+        'qits-ci': { apiDocs: '/ci/q/swagger-ui' },
+        'qits-stt': { apiDocs: 'stt/q/swagger-ui' },
+        'qits-docs': { apiDocs: null },
+        'qits-githost': {},
+        'qits-mirror': null,
+      },
+    });
+    expect(tree.apiDocs).toEqual({
+      'qits-ci': '/ci/q/swagger-ui',
+      'qits-stt': '/stt/q/swagger-ui',
+    });
+    // Absence is a real answer — a service that documents no HTTP surface — not an empty string.
+    expect('qits-docs' in tree.apiDocs).toBe(false);
+  });
+
+  it('serves the api-docs paths beside the legacy shape too, from an edge mid-upgrade', () => {
+    const tree = toNavTree({
+      links: [{ label: 'CI', href: '/ci/' }],
+      applications: { 'qits-ci': { apiDocs: '/ci/q/swagger-ui' } },
+    });
+    expect(tree.legacy).toEqual([{ label: 'CI', href: '/ci/' }]);
+    expect(tree.apiDocs).toEqual({ 'qits-ci': '/ci/q/swagger-ui' });
   });
 });
 
