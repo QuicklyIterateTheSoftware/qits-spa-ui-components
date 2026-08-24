@@ -10,16 +10,50 @@ import {
 } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 
+import { QitsAppLinks, QITS_BROWSER_ORIGIN } from './app-links';
 import { QitsNavSubmenuSlot } from './nav-submenu';
-import { QITS_NAVIGATION, type QitsNavLink } from './navigation';
+import { QITS_NAVIGATION, type QitsNavLink, type QitsNavSlot } from './navigation';
 import { QitsPicker, type QitsPickerOption } from './picker';
-import { QITS_PROJECT_SCOPE } from './project-scope';
 import { QITS_PROJECTS } from './projects';
+import { QITS_REPOSITORIES } from './repositories';
+import { QITS_CATEGORIES, QITS_SCOPE, scopePath, type QitsScope } from './scope';
 
 /** `/ci` and `/ci/` name the same application; comparing normalised paths keeps the match honest. */
 function toDirectoryPath(href: string): string {
   const { pathname } = new URL(href || '/', 'http://qits.invalid');
   return pathname.endsWith('/') ? pathname : `${pathname}/`;
+}
+
+/** The host part of an origin, port included — or `undefined` for something that is not one. */
+function hostOf(origin: string | undefined): string | undefined {
+  if (!origin) return undefined;
+  try {
+    return new URL(origin).host;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * An address on the projects host: its origin, the scope path, then `path`. With no origin known
+ * the path stands alone, which is right on the projects host itself and the best that can be said
+ * anywhere else.
+ */
+function link(origin: string | undefined, scope: QitsScope, path: string): string {
+  const tail = `${scopePath(scope)}${path.replace(/^\/+/, '')}`;
+  return origin ? `${origin.replace(/\/+$/, '')}${tail}` : tail;
+}
+
+/** One line of the sidebar. Headings and notes are rows too, so the order is stated in one list. */
+interface QitsNavRow {
+  readonly kind: 'heading' | 'link' | 'note' | 'alert';
+  /** Unique, and what the sub-menu is placed by. */
+  readonly key: string;
+  readonly label: string;
+  readonly href?: string;
+  readonly current?: boolean;
+  /** A row belonging to the one above it: indented, and only ever one level deep. */
+  readonly child?: boolean;
 }
 
 /**
@@ -31,23 +65,30 @@ function toDirectoryPath(href: string): string {
  * below it a burger in the top bar reveals it. Only the burger is state, which is why resizing a
  * window never has to be observed and the component renders the same on a server as in a browser.
  *
- * The links leave the SPA on purpose. Each destination is its own Angular application behind its
- * own base path, so they are plain `<a href>` full-document navigations — `routerLink` would look
- * right and go nowhere. Where the list *comes from* is `QITS_NAVIGATION`: the platform is asked
- * what it contains rather than told at compile time, because a list compiled into this package is
- * a second source of truth for the platform's own topology and it will lag the first one.
+ * **The sidebar is a tree of what is in scope, not a list of applications.** Every service is its
+ * own host and every SPA shares one URL grammar — `/<project>/<category>/<repository>/…` — so the
+ * chrome can name the project, its repositories by group, and under the repository on screen the
+ * applications that have something to say about it. Which applications those are is the platform's
+ * knowledge, asked for through `QITS_NAVIGATION`; which repositories exist is qits-projects', asked
+ * for through `QITS_REPOSITORIES`; what is in scope is the address's, read through `QITS_SCOPE`.
+ * Nothing of the three is compiled in, because a list compiled into this package is a second source
+ * of truth for the platform's own topology and it will lag the first one.
  *
- * Under the entry that is this application, an app can hang a sub-menu of its own —
+ * The links leave the SPA on purpose. Each destination is its own Angular application on its own
+ * host, so they are plain `<a href>` full-document navigations — `routerLink` would look right and
+ * go nowhere.
+ *
+ * An edge that predates slots answers the flat `{links}` shape, and the sidebar then draws exactly
+ * the list it always drew. That is the one release the two shapes overlap for.
+ *
+ * Under the row that is this page, an app can hang a sub-menu of its own —
  * `<ng-template qitsNavSubmenu>` in the shell, see {@link QitsNavSubmenu}. The layout gives it a
  * bare block and styles nothing inside it.
  *
- * **The top-left slot is the project picker, not a wordmark.** Every resource this platform holds —
- * a repository, a run, an artifact, a workspace — belongs to a project, so which project is being
- * looked at is the outermost thing about a page and not a filter inside one of them. It sits above
- * the links because it scopes them, and it replaces the brand rather than sitting beside it because
- * a name that never changes is worth less than the one control every page is subordinate to. An app
- * that provides no `QITS_PROJECTS` still gets `brand()` there, which is what keeps this a slot
- * rather than a requirement.
+ * **The top-left slot is the project picker, not a wordmark.** Every resource this platform holds
+ * belongs to a project, so which project is being looked at is the outermost thing about a page and
+ * not a filter inside one of them. An app that provides no `QITS_PROJECTS` still gets `brand()`
+ * there, which is what keeps this a slot rather than a requirement.
  */
 @Component({
   selector: 'qits-main-layout',
@@ -78,7 +119,7 @@ function toDirectoryPath(href: string): string {
             } @else {
               <qits-picker
                 [options]="projectOptions()"
-                [value]="projectId()"
+                [value]="projectSlug()"
                 (valueChange)="onProject($event)"
                 ariaLabel="Project"
                 placeholder="Pick a project"
@@ -99,18 +140,32 @@ function toDirectoryPath(href: string): string {
         [attr.aria-busy]="pending() ? 'true' : null"
       >
         <ul class="qits-layout-links">
-          @for (link of navLinks(); track link.href) {
+          @for (row of rows(); track row.key) {
             <li>
-              <a
-                class="qits-layout-link"
-                [class.qits-layout-link-current]="link.current"
-                [href]="link.href"
-                [attr.aria-current]="link.current ? 'page' : null"
-                (click)="closeNav()"
-                >{{ link.label }}</a
-              >
-              @if (link.current) {
-                <!-- Two nested @if rather than one condition: \`link.current && submenu()\` narrows to
+              @switch (row.kind) {
+                @case ('heading') {
+                  <p class="qits-layout-heading">{{ row.label }}</p>
+                }
+                @case ('note') {
+                  <p class="qits-layout-note">{{ row.label }}</p>
+                }
+                @case ('alert') {
+                  <p class="qits-layout-note qits-layout-alert" role="alert">{{ row.label }}</p>
+                }
+                @default {
+                  <a
+                    class="qits-layout-link"
+                    [class.qits-layout-link-child]="row.child"
+                    [class.qits-layout-link-current]="row.current"
+                    [href]="row.href"
+                    [attr.aria-current]="row.current ? 'page' : null"
+                    (click)="closeNav()"
+                    >{{ row.label }}</a
+                  >
+                }
+              }
+              @if (row.key === currentKey()) {
+                <!-- Two nested @if rather than one condition: \`… && submenu()\` narrows to
                      \`TemplateRef | false | null\`, which ngTemplateOutlet rejects under strictTemplates. -->
                 @if (submenu(); as tpl) {
                   <!-- The click handler only closes the mobile panel behind a link the browser was
@@ -260,6 +315,38 @@ function toDirectoryPath(href: string): string {
       color: #111827;
       font-weight: 600;
     }
+    /* A child belongs to the row above it, so it is indented and quieter — not a second style of
+       link. The rail is what makes a group of them read as one block. */
+    .qits-layout-link-child {
+      margin-left: 10px;
+      padding-left: 12px;
+      border-left: 2px solid #e5e7eb;
+      border-radius: 0 6px 6px 0;
+      font-size: 13px;
+    }
+    /* A heading is a label, not a target: small caps, no hover, and enough space above it that the
+       group below reads as belonging to it. */
+    .qits-layout-heading {
+      margin: 10px 0 2px;
+      padding: 0 10px;
+      color: #9ca3af;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .qits-layout-links > li:first-child .qits-layout-heading {
+      margin-top: 0;
+    }
+    .qits-layout-note {
+      margin: 0;
+      padding: 6px 10px;
+      font-size: 13px;
+      color: #6b7280;
+    }
+    .qits-layout-alert {
+      color: #b91c1c;
+    }
 
     /* A box, not a look. What goes in here is the application's, declared in the application's own
        style scope, so the layout gives it room and nothing else. */
@@ -328,34 +415,36 @@ export class QitsMainLayout {
   /** What the bar calls this platform. */
   readonly brand = input<string>('qits');
   /**
-   * An explicit override of the platform navigation. Left empty — the default — the layout asks
-   * `QITS_NAVIGATION` instead. A **non-empty** list wins outright and the source is not consulted
-   * at all, which is what lets a story, a spec or a `ng serve` with no gateway in front of it
-   * render the real chrome with no provider anywhere.
+   * An explicit override of the platform navigation, in the **flat** shape. Left empty — the
+   * default — the layout asks `QITS_NAVIGATION` instead. A **non-empty** list wins outright and the
+   * source is not consulted at all, which is what lets a story, a spec or an `ng serve` with no
+   * platform in front of it render the real chrome with no provider anywhere.
    */
   readonly links = input<readonly QitsNavLink[]>([]);
 
   private readonly doc = inject(DOCUMENT);
+  private readonly appLinks = inject(QitsAppLinks);
+  private readonly browserOrigin = inject(QITS_BROWSER_ORIGIN);
   /**
    * Optional on purpose. An app that forgets the provider lands in the stranded state below — one
    * way out, and a line saying so — rather than failing to bootstrap at all with NG0201.
    */
   private readonly source = inject(QITS_NAVIGATION, { optional: true });
 
-  /** What an application hung under its own entry, if anything. */
+  /** What an application hung under its own row, if anything. */
   protected readonly submenu = inject(QitsNavSubmenuSlot).template;
 
   /**
-   * The projects to offer, and which one is current — both optional, and both absent is the state
-   * every SPA was in before the picker existed: the brand text, and nothing else in the slot.
+   * The three reads the chrome does, all optional, and all absent is the state every SPA was in
+   * before any of this: a flat list of doors and a wordmark.
    *
-   * They are separate injections because they answer different questions and come from different
-   * places: the *list* is the platform's (one read of qits-projects, the same everywhere), while
-   * *which one* is the application's, because only the application knows whether its own addresses
-   * name a project. `provideQitsProjects()` supplies both, the second as a `?project=` default.
+   * They are separate because they answer different questions from different places: the *list of
+   * projects* is the platform's, *which one is open* is the address's, and *what is inside it* is
+   * qits-projects' answer about that one project.
    */
   private readonly projects = inject(QITS_PROJECTS, { optional: true });
-  private readonly scope = inject(QITS_PROJECT_SCOPE, { optional: true });
+  private readonly scopeSource = inject(QITS_SCOPE, { optional: true });
+  private readonly repositories = inject(QITS_REPOSITORIES, { optional: true });
 
   /**
    * Whether the slot is the picker rather than the wordmark. Read once, not computed: an app either
@@ -365,57 +454,89 @@ export class QitsMainLayout {
    * say which is open nor act on a pick — a dead control in the most prominent place in the chrome,
    * which is worse than the brand text it would have replaced.
    */
-  protected readonly hasPicker = this.projects !== null && this.scope !== null;
+  protected readonly hasPicker = this.projects !== null && this.scopeSource !== null;
 
   /**
-   * Which link is *this* application. Read once from the document's base URI rather than from the
-   * router, because the thing being matched is the app's own mount point, not its current route —
-   * and because a base URI exists on a server too.
+   * Which link is *this* application in the flat shape. Read once from the document's base URI
+   * rather than from the router, because the thing being matched is the app's own mount point, not
+   * its current route — and because a base URI exists on a server too.
    */
   private readonly basePath = toDirectoryPath(this.doc.baseURI ?? '/');
 
   protected readonly navOpen = signal(false);
 
   /**
-   * The list to render, or `undefined` for "nobody has answered yet".
+   * What the platform answered, or `undefined` for "nobody has answered yet".
    *
-   * There is deliberately **no compiled-in fallback list**. Shipping the platform's front doors
-   * here as a safety net would put back the exact defect this replaced *and hide it*: the chrome
-   * would sometimes show what the platform routes and sometimes a guess frozen at release time,
-   * with nothing on screen telling the two apart. An honest empty state is worth more than a
-   * plausible wrong one — so a source that answers with nothing strands the reader visibly.
+   * There is deliberately **no compiled-in fallback**. Shipping the platform's front doors here as
+   * a safety net would put back the exact defect this replaced *and hide it*: the chrome would
+   * sometimes show what the platform routes and sometimes a guess frozen at release time, with
+   * nothing on screen telling the two apart.
    */
-  private readonly resolved = computed<readonly QitsNavLink[] | undefined>(() => {
+  private readonly tree = computed(() => {
     const own = this.links();
     // `own?.length`, not `own.length`: `withComponentInputBinding()` writes `undefined` into a route
     // component's inputs for every route parameter it cannot supply, and it has wiped this one
     // before. An input with a default is not a guarantee of a value.
-    if (own?.length) return own;
+    if (own?.length) return { entries: [], environmentOrigin: undefined, legacy: own };
     // No provider at all is not "waiting" — nothing is coming. Strand it rather than spin forever.
-    return this.source ? this.source.links() : [];
+    return this.source
+      ? this.source.tree()
+      : { entries: [], environmentOrigin: undefined, legacy: [] };
   });
 
-  /** Nothing has answered yet: render no links and say so on the `<nav>`. */
-  protected readonly pending = computed(() => this.resolved() === undefined);
+  /** Nothing has answered yet: render nothing and say so on the `<nav>`. */
+  protected readonly pending = computed(() => this.tree() === undefined);
 
-  /** Answered, but with nothing — an empty list or a request that failed. */
-  protected readonly stranded = computed(() => this.resolved()?.length === 0);
+  /** Answered, and there is nothing to draw — an empty platform, or a request that failed. */
+  protected readonly stranded = computed(() => !this.pending() && this.rows().length === 0);
 
-  protected readonly navLinks = computed(() =>
-    (this.resolved() ?? []).map((link) => ({
-      ...link,
-      current: toDirectoryPath(link.href) === this.basePath,
-    })),
+  /** Where qits-projects is served: by name, or by the host it is known to answer on. */
+  private readonly projectsOrigin = computed(
+    () =>
+      this.appLinks.origin('qits-projects') ??
+      this.tree()?.entries.find((entry) => entry.host === 'projects')?.origin,
   );
 
+  private readonly onProjectsHost = computed(() => {
+    const host = hostOf(this.projectsOrigin());
+    return host !== undefined && host === hostOf(this.browserOrigin);
+  });
+
+  /** What the address says is on screen. Empty where an app provided no scope at all. */
+  private readonly scope = computed<QitsScope>(() => this.scopeSource?.scope() ?? {});
+
   /**
-   * Whether any entry is this application. False whenever nothing in the list is where this app is
-   * served from: the gateway does not route it yet, or it is a bare `ng serve` on a port of its own.
-   * The sub-menu still has to go somewhere, so it goes to the foot of the navigation rather than
-   * nowhere — the two placements are mutually exclusive by construction, so it is instantiated at
-   * most once either way.
+   * The sidebar, top to bottom.
+   *
+   * <p><b>The most specific row wins.</b> The rows are built deepest-first — a repository under its
+   * group, a group under the project, the platform-wide groups last — and at most one of them is
+   * marked current, the first. Two rows claiming the page would be two answers to "where am I", and
+   * the sub-menu would have two places to go.
    */
-  protected readonly hasCurrent = computed(() => this.navLinks().some((link) => link.current));
+  protected readonly rows = computed<readonly QitsNavRow[]>(() => {
+    const legacy = this.tree()?.legacy;
+    if (legacy) {
+      return legacy.map((link) => ({
+        kind: 'link' as const,
+        key: link.href,
+        label: link.label,
+        href: link.href,
+        current: toDirectoryPath(link.href) === this.basePath,
+      }));
+    }
+    return firstCurrentOnly(this.treeRows());
+  });
+
+  /** The row the sub-menu hangs under, if any row is this page. */
+  protected readonly currentKey = computed(() => this.rows().find((row) => row.current)?.key);
+
+  /**
+   * Whether any row is this page. False on a bare `ng serve`, on an app the platform does not serve
+   * yet, and wherever the answer is flat and names no address of ours. The sub-menu still has to go
+   * somewhere, so it goes to the foot of the navigation rather than nowhere.
+   */
+  protected readonly hasCurrent = computed(() => this.currentKey() !== undefined);
 
   /** Nothing has answered with a project list yet. */
   protected readonly projectsPending = computed(() => this.projects?.projects() === undefined);
@@ -425,22 +546,23 @@ export class QitsMainLayout {
 
   protected readonly projectOptions = computed<QitsPickerOption<string>[]>(() =>
     (this.projects?.projects() ?? []).map((project) => ({
-      value: project.id,
+      value: project.slug,
       label: project.name,
     })),
   );
 
   /**
-   * The project on screen, as the scope reports it — never stored here.
+   * The project on screen, as the scope reports it — never stored here, and named by its slug
+   * because that is what the address says.
    *
-   * An id the list does not contain is passed through rather than blanked: `QitsPicker` resolves a
+   * A slug the list does not contain is passed through rather than blanked: `QitsPicker` resolves a
    * value against its options and shows the list again when nothing matches, so a URL naming a
    * project that no longer exists lands on the choices instead of a pill with no label.
    */
-  protected readonly projectId = computed(() => this.scope?.projectId());
+  protected readonly projectSlug = computed(() => this.scope().project);
 
-  protected onProject(projectId: string | undefined): void {
-    this.scope?.select(projectId);
+  protected onProject(projectSlug: string | undefined): void {
+    this.scopeSource?.select(projectSlug);
     // A pick is a navigation, so the mobile panel must not be left open on top of where it went.
     this.closeNav();
   }
@@ -462,4 +584,143 @@ export class QitsMainLayout {
   protected onSubmenuNavigate(event: Event): void {
     if ((event.target as Element | null)?.closest('a')) this.closeNav();
   }
+
+  /** The nested sidebar: the project, its repositories by group, then the platform-wide groups. */
+  private treeRows(): QitsNavRow[] {
+    const scope = this.scope();
+    const project = scope.project;
+    const rows: QitsNavRow[] = [];
+    if (project) {
+      rows.push(...this.projectRows(project, scope));
+      rows.push(...this.repositoryRows(project, scope));
+      rows.push(...this.group('PLATFORM', 'platform', { project }));
+    }
+    rows.push(...this.group('SYSTEM', 'system', {}));
+    return rows;
+  }
+
+  /** The Project node and what belongs to the project rather than to one of its repositories. */
+  private projectRows(project: string, scope: QitsScope): QitsNavRow[] {
+    const origin = this.projectsOrigin();
+    const setup = link(origin, { project }, 'project-setup');
+    const children: QitsNavRow[] = [
+      {
+        kind: 'link',
+        key: 'project-setup',
+        label: 'Project setup',
+        href: setup,
+        current:
+          this.onProjectsHost() &&
+          this.appLinks.currentPath().startsWith(`/${project}/project-setup`),
+        child: true,
+      },
+      ...this.entryRows('project.detail', { project }, 'project.detail'),
+    ];
+    return [
+      {
+        kind: 'link',
+        key: 'project',
+        label: 'Project',
+        href: link(origin, { project }, ''),
+        // The project itself, unless something inside it is the page — the deepest row wins.
+        current:
+          this.onProjectsHost() && !scope.category && !children.some((child) => child.current),
+      },
+      ...children,
+    ];
+  }
+
+  /**
+   * One group per category that has repositories, and under the repository in scope the
+   * applications that have something to say about it.
+   *
+   * The children hang off the repository in scope alone. A tree that opened every repository would
+   * be as long as the project is big, and it would say nothing about where the reader is.
+   */
+  private repositoryRows(project: string, scope: QitsScope): QitsNavRow[] {
+    if (!this.repositories) return [];
+    if (this.repositories.repositories() === undefined) {
+      return [{ kind: 'note', key: 'repositories-pending', label: 'Loading repositories…' }];
+    }
+    if (this.repositories.failed()) {
+      return [{ kind: 'alert', key: 'repositories-failed', label: 'Could not load repositories.' }];
+    }
+    const all = this.repositories.repositories() ?? [];
+    const origin = this.projectsOrigin();
+    const rows: QitsNavRow[] = [];
+    for (const category of QITS_CATEGORIES) {
+      const inGroup = all.filter((repository) => repository.category === category);
+      if (inGroup.length === 0) continue;
+      rows.push({ kind: 'heading', key: `heading:${category}`, label: category.toUpperCase() });
+      for (const repository of inGroup) {
+        const open = scope.category === category && scope.repository === repository.name;
+        const inScope: QitsScope = { project, category, repository: repository.name };
+        // `scoped: false` — an application with no host has no address for this repository, so its
+        // row leads to its front page and says nothing about where the reader is.
+        const children = open
+          ? this.entryRows(`${category}.details`, inScope, `${category}.details`, true, false)
+          : [];
+        rows.push({
+          kind: 'link',
+          key: `repository:${category}/${repository.name}`,
+          label: repository.name,
+          href: link(origin, inScope, ''),
+          current: open && this.onProjectsHost() && !children.some((child) => child.current),
+        });
+        rows.push(...children);
+      }
+    }
+    return rows;
+  }
+
+  /** A heading and the entries of one slot, or nothing at all where the slot is empty. */
+  private group(heading: string, slot: QitsNavSlot, scope: QitsScope): QitsNavRow[] {
+    const rows = this.entryRows(slot, scope, slot, false);
+    return rows.length === 0
+      ? []
+      : [{ kind: 'heading', key: `heading:${slot}`, label: heading }, ...rows];
+  }
+
+  /**
+   * The entries of one slot as rows.
+   *
+   * An application the platform serves on **no host of its own** is drawn all the same, at its own
+   * segment under the environment origin — `QitsAppLinks.href` drops the scope for it, because such
+   * an application has no scoped address. `scoped` is how the caller says that dropping the scope
+   * would be a lie rather than a fallback: under a repository, an unscoped link goes to the
+   * application's front page, so it is drawn but never marked as the repository on screen.
+   */
+  private entryRows(
+    slot: QitsNavSlot,
+    scope: QitsScope,
+    keyPrefix: string,
+    child = true,
+    scoped = true,
+  ): QitsNavRow[] {
+    const rows: QitsNavRow[] = [];
+    for (const entry of this.appLinks.entries(slot)) {
+      const href = this.appLinks.href(entry.app, '', scope);
+      if (!href) continue;
+      rows.push({
+        kind: 'link',
+        key: `${keyPrefix}:${entry.app}`,
+        label: entry.label,
+        href,
+        current: (scoped || entry.host !== null) && this.appLinks.isCurrent(entry, scope),
+        child,
+      });
+    }
+    return rows;
+  }
+}
+
+/** At most one row is the page, and it is the first — the rows are ordered most specific first. */
+function firstCurrentOnly(rows: readonly QitsNavRow[]): QitsNavRow[] {
+  let seen = false;
+  return rows.map((row) => {
+    if (!row.current) return row;
+    if (seen) return { ...row, current: false };
+    seen = true;
+    return row;
+  });
 }

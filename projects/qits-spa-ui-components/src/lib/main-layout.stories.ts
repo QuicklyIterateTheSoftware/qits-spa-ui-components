@@ -1,4 +1,4 @@
-import { Component, signal } from '@angular/core';
+import { Component, signal, type Provider } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import {
   applicationConfig,
@@ -8,13 +8,21 @@ import {
   type StoryObj,
 } from '@storybook/angular-vite';
 
+import { QITS_BROWSER_ORIGIN } from './app-links';
 import { QitsBadge } from './badge';
 import { QitsCard } from './card';
 import { QitsMainLayout } from './main-layout';
 import { QitsNavSubmenu } from './nav-submenu';
-import { provideQitsNavigationLinks, QITS_NAVIGATION, type QitsNavLink } from './navigation';
-import { QITS_PROJECT_SCOPE, QueryParamProjectScope } from './project-scope';
+import {
+  provideQitsNavigationLinks,
+  provideQitsNavigationTree,
+  QITS_NAVIGATION,
+  type QitsNavigation,
+  type QitsNavLink,
+} from './navigation';
 import { provideQitsProjectList, QITS_PROJECTS, type QitsProject } from './projects';
+import { provideQitsRepositoryList, type QitsRepository } from './repositories';
+import { QITS_SCOPE, type QitsScope } from './scope';
 
 /** Stand-in for whatever an app routes into the layout. */
 @Component({
@@ -32,7 +40,112 @@ class Child {
   protected readonly runs = Array.from({ length: 12 }, (_, i) => `main @ commit ${12 - i}`);
 }
 
-/** What a running platform would answer with. The workbench has no gateway in front of it. */
+const PROJECTS_ORIGIN = 'https://projects.dev.example.com';
+const CI_ORIGIN = 'https://ci.dev.example.com';
+
+/** What a running platform answers with: one entry per application, filed under a slot. */
+const DEMO_NAVIGATION: QitsNavigation = {
+  environment: 'dev',
+  origin: 'https://dev.example.com',
+  slots: {
+    system: [
+      {
+        app: 'qits-projects',
+        label: 'Overview',
+        host: 'projects',
+        path: '/projects',
+        origin: PROJECTS_ORIGIN,
+        position: 1,
+      },
+      {
+        app: 'qits-platform-mirror',
+        label: 'Mirror',
+        host: 'mirror',
+        path: '/mirror',
+        origin: 'https://mirror.dev.example.com',
+        position: 2,
+      },
+      {
+        app: 'qits-platform-system',
+        label: 'System',
+        host: 'system',
+        path: '/system',
+        origin: 'https://system.dev.example.com',
+        position: 4,
+      },
+    ],
+    platform: [
+      {
+        app: 'qits-platform-events',
+        label: 'Events',
+        host: 'events',
+        path: '/events',
+        origin: 'https://events.dev.example.com',
+        position: 1,
+      },
+      {
+        app: 'qits-platform-deployments',
+        label: 'Deployments',
+        host: 'deployments',
+        path: '/platform-deployments',
+        origin: 'https://deployments.dev.example.com',
+        position: 4,
+      },
+    ],
+    'project.detail': [
+      {
+        app: 'qits-workspaces',
+        label: 'Workspaces',
+        host: 'workspaces',
+        path: '/workspaces',
+        origin: 'https://workspaces.dev.example.com',
+        position: 1,
+      },
+    ],
+    'services.details': [
+      {
+        app: 'qits-docs',
+        label: 'Docs',
+        host: 'docs',
+        path: '/docs',
+        origin: 'https://docs.dev.example.com',
+        position: 1,
+      },
+      { app: 'qits-ci', label: 'CI', host: 'ci', path: '/ci', origin: CI_ORIGIN, position: 2 },
+      // Not flipped yet: no host of its own, so the environment origin and its own segment. Its
+      // row is drawn all the same, and leads to its front page rather than to this repository.
+      {
+        app: 'qits-artifacts',
+        label: 'Artifacts',
+        host: null,
+        path: '/artifacts',
+        origin: 'https://dev.example.com',
+        position: 3,
+      },
+      {
+        app: 'qits-workspaces',
+        label: 'Workspaces',
+        host: 'workspaces',
+        path: '/workspaces',
+        origin: 'https://workspaces.dev.example.com',
+        position: 5,
+      },
+    ],
+    'libs.details': [
+      {
+        app: 'qits-docs',
+        label: 'Docs',
+        host: 'docs',
+        path: '/docs',
+        origin: 'https://docs.dev.example.com',
+        position: 1,
+      },
+      { app: 'qits-ci', label: 'CI', host: 'ci', path: '/ci', origin: CI_ORIGIN, position: 2 },
+    ],
+  },
+};
+
+/** The flat shape an edge without slots answers — one release of overlap, and this is what it looks like. */
 const DEMO_LINKS: readonly QitsNavLink[] = [
   { label: 'Home', href: '/' },
   { label: 'CI', href: '/ci/' },
@@ -41,27 +154,59 @@ const DEMO_LINKS: readonly QitsNavLink[] = [
   { label: 'Projects', href: '/projects/' },
 ];
 
-/** What qits-projects would answer with, for the stories that put the picker in the brand slot. */
 const DEMO_PROJECTS: readonly QitsProject[] = [
-  { id: 'payments', name: 'Payments' },
-  { id: 'billing', name: 'Billing' },
-  { id: 'platform-infra', name: 'Platform infrastructure' },
+  { id: 'p1', slug: 'qits', name: 'qits' },
+  { id: 'p2', slug: 'payments', name: 'Payments' },
+  { id: 'p3', slug: 'platform-infra', name: 'Platform infrastructure' },
 ];
 
-// The layout hosts a `<router-outlet />`, which needs a router in scope, and it asks
-// `QITS_NAVIGATION` for its links. `applicationConfig` is where the angular-vite framework takes
-// providers: an empty route table is enough — the stories document the chrome, not what routes into
-// it — and `provideQitsNavigationLinks` stands in for the gateway without a request being made.
+const DEMO_REPOSITORIES: readonly QitsRepository[] = [
+  { id: 'r1', name: 'qits-ci', category: 'services' },
+  { id: 'r2', name: 'qits-projects', category: 'services' },
+  { id: 'r3', name: 'qits-workspaces', category: 'services' },
+  { id: 'r4', name: 'qits-eventstream', category: 'libs' },
+  { id: 'r5', name: 'qits-spa-projects', category: 'frontends' },
+];
+
+/**
+ * The workbench is served from `/iframe.html`, so the address says nothing about a project. A
+ * literal scope stands in for the one an application reads out of its own URL.
+ */
+function scopeAt(scope: QitsScope): Provider {
+  return {
+    provide: QITS_SCOPE,
+    useValue: {
+      scope: signal(scope),
+      projectId: signal(scope.project ? 'p1' : undefined),
+      repositoryId: signal(scope.repository ? 'r1' : undefined),
+      routing: 'repository' as const,
+      select: () => undefined,
+    },
+  };
+}
+
+// The layout hosts a `<router-outlet />`, which needs a router in scope, and it asks the platform
+// what it contains. `applicationConfig` is where the angular-vite framework takes providers, and
+// the literal sources stand in for the platform without a request being made.
 //
-// The breakpoint is CSS, so the way to see both shapes is the viewport toolbar, or simply a narrower
-// browser window — there is no `mobile` input to flip.
+// The breakpoint is CSS, so the way to see both shapes is the viewport toolbar, or simply a
+// narrower browser window — there is no `mobile` input to flip.
 const meta: Meta<QitsMainLayout> = {
   title: 'Layout/MainLayout',
   component: QitsMainLayout,
   tags: ['autodocs'],
   args: { brand: 'qits' },
   decorators: [
-    applicationConfig({ providers: [provideRouter([]), provideQitsNavigationLinks(DEMO_LINKS)] }),
+    applicationConfig({
+      providers: [
+        provideRouter([]),
+        provideQitsNavigationTree(DEMO_NAVIGATION),
+        provideQitsProjectList(DEMO_PROJECTS),
+        provideQitsRepositoryList(DEMO_REPOSITORIES, 'r9'),
+        scopeAt({}),
+        { provide: QITS_BROWSER_ORIGIN, useValue: PROJECTS_ORIGIN },
+      ],
+    }),
   ],
   render: (args) => ({
     props: args,
@@ -72,9 +217,49 @@ const meta: Meta<QitsMainLayout> = {
 export default meta;
 type Story = StoryObj<QitsMainLayout>;
 
+/** No project in scope: the groups that are about one have nothing to say, so only SYSTEM shows. */
 export const Default: Story = {};
 
 export const Branded: Story = { args: { brand: 'qits ci' } };
+
+/**
+ * A project in scope. The Project node and what belongs to the project come first, then one group
+ * per category that has repositories — the sidebar the platform's own URL grammar makes possible.
+ */
+export const Grouped: Story = {
+  decorators: [applicationConfig({ providers: [scopeAt({ project: 'qits' })] })],
+};
+
+/**
+ * A repository in scope, read from a browser sitting on the ci host. The repository's own row is
+ * open and lists what the platform has to say about it, and the entry that *is* this host is the
+ * current page — host and path together, because either alone would mark the wrong row.
+ *
+ * Artifacts is an application the platform has not flipped yet: it has no host of its own, so its
+ * row points at its old segment under the environment origin, unscoped, and is never the page.
+ */
+export const RepositoryInScope: Story = {
+  name: 'Repository in scope',
+  decorators: [
+    applicationConfig({
+      providers: [
+        scopeAt({ project: 'qits', category: 'services', repository: 'qits-ci' }),
+        { provide: QITS_BROWSER_ORIGIN, useValue: CI_ORIGIN },
+      ],
+    }),
+  ],
+};
+
+/**
+ * What an edge that predates slots answers: a flat list of front doors, drawn exactly as it always
+ * was. One release of overlap, and then the shape goes away.
+ */
+export const LegacyFlat: Story = {
+  name: 'Legacy flat',
+  decorators: [
+    applicationConfig({ providers: [provideRouter([]), provideQitsNavigationLinks(DEMO_LINKS)] }),
+  ],
+};
 
 /**
  * `links` is an explicit override, and a non-empty one suppresses the navigation source entirely.
@@ -103,14 +288,14 @@ export const Waiting: Story = {
       providers: [
         provideRouter([]),
         // A source that is simply never answered — what the first paint of every SPA looks like.
-        { provide: QITS_NAVIGATION, useValue: { links: signal(undefined), failed: signal(false) } },
+        { provide: QITS_NAVIGATION, useValue: { tree: signal(undefined), failed: signal(false) } },
       ],
     }),
   ],
 };
 
 /**
- * The navigation could not be fetched, or came back empty. One way out — the gateway's own root,
+ * The navigation could not be fetched, or came back empty. One way out — the platform's own root,
  * which is not a registry entry and so cannot go stale — under a line saying what happened.
  */
 export const Stranded: Story = {
@@ -120,20 +305,24 @@ export const Stranded: Story = {
 };
 
 /**
- * An application's own sub-menu, under the entry that is that application. The layout gives it a
+ * An application's own sub-menu, under the row that is that application. The layout gives it a
  * bare block and styles nothing inside it — everything visible here belongs to the story.
  *
  * Declare the `<ng-template qitsNavSubmenu>` in the app shell beside the `<router-outlet />`, never
  * inside a page: a page's declaration is rebuilt on every navigation, and the panel would lose its
  * scroll position and its open groups on each hop.
- *
- * The workbench is served from `/iframe.html`, so no entry here *is* this application and the
- * sub-menu falls to the foot of the navigation — the placement a SPA the gateway does not route
- * yet also gets. In a deployed SPA it sits under that SPA's own entry.
  */
 export const WithSubmenu: Story = {
   name: 'With a sub-menu',
-  decorators: [moduleMetadata({ imports: [QitsNavSubmenu] })],
+  decorators: [
+    moduleMetadata({ imports: [QitsNavSubmenu] }),
+    applicationConfig({
+      providers: [
+        scopeAt({ project: 'qits', category: 'services', repository: 'qits-ci' }),
+        { provide: QITS_BROWSER_ORIGIN, useValue: CI_ORIGIN },
+      ],
+    }),
+  ],
   render: (args) => ({
     props: args,
     template: `
@@ -150,26 +339,17 @@ export const WithSubmenu: Story = {
 };
 
 /**
- * The top-left slot as the platform actually ships it: the project picker where the wordmark is in
- * every story above. Every resource on this platform belongs to a project, so which one is open is
- * the outermost fact about a page — above the links, because it scopes them.
+ * The top-left slot as the platform ships it: the project picker where a wordmark would be. Every
+ * resource on this platform belongs to a project, so which one is open is the outermost fact about
+ * a page — above the links, because it scopes them.
  *
  * With nothing picked the picker *is* its own list, so the bar is as tall as the projects there
- * are and the links sit under it; picking one collapses the list into the pill and the bar shrinks
- * back to a row. `provideQitsProjects()` is the real wiring — one `GET /projects/api/projects` —
- * and `provideQitsProjectList` is the same contract answered from a literal, which is what a
- * workbench with no platform behind it needs.
+ * are; picking one collapses the list into the pill and the bar shrinks back to a row.
  */
 export const WithProjectPicker: Story = {
   name: 'With the project picker',
   decorators: [
-    applicationConfig({
-      providers: [
-        provideRouter([{ path: '**', component: Child }]),
-        provideQitsNavigationLinks(DEMO_LINKS),
-        provideQitsProjectList(DEMO_PROJECTS),
-      ],
-    }),
+    applicationConfig({ providers: [provideRouter([{ path: '**', component: Child }])] }),
   ],
 };
 
@@ -182,13 +362,10 @@ export const ProjectsLoading: Story = {
   decorators: [
     applicationConfig({
       providers: [
-        provideRouter([]),
-        provideQitsNavigationLinks(DEMO_LINKS),
         {
           provide: QITS_PROJECTS,
           useValue: { projects: signal(undefined), failed: signal(false) },
         },
-        { provide: QITS_PROJECT_SCOPE, useClass: QueryParamProjectScope },
       ],
     }),
   ],
@@ -200,15 +377,7 @@ export const ProjectsLoading: Story = {
  */
 export const ProjectsUnavailable: Story = {
   name: 'Projects unavailable',
-  decorators: [
-    applicationConfig({
-      providers: [
-        provideRouter([]),
-        provideQitsNavigationLinks(DEMO_LINKS),
-        provideQitsProjectList([], { failed: true }),
-      ],
-    }),
-  ],
+  decorators: [applicationConfig({ providers: [provideQitsProjectList([], { failed: true })] })],
 };
 
 /**
@@ -220,10 +389,7 @@ export const WithRoutedChild: Story = {
   name: 'With a routed child',
   decorators: [
     applicationConfig({
-      providers: [
-        provideRouter([{ path: '**', component: Child }]),
-        provideQitsNavigationLinks(DEMO_LINKS),
-      ],
+      providers: [provideRouter([{ path: '**', component: Child }]), scopeAt({ project: 'qits' })],
     }),
   ],
 };

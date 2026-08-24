@@ -9,11 +9,16 @@ import {
   type Signal,
 } from '@angular/core';
 
-import { QITS_PROJECT_SCOPE, QueryParamProjectScope } from './project-scope';
+import { provideQitsRepositories } from './repositories';
 
-/** One project, as the chrome needs it: an id to address it by, and a name to show. */
+/**
+ * One project, as the chrome needs it: an id the API resolves, the **slug** URLs spell, and a name
+ * to show. Two identifiers because the two planes disagree on purpose — a slug is readable and can
+ * be corrected, an id is stable — and this library is where the reader's URL meets the API.
+ */
 export interface QitsProject {
   readonly id: string;
+  readonly slug: string;
   readonly name: string;
 }
 
@@ -96,14 +101,15 @@ class HttpProjectsSource implements QitsProjectsSource {
  * nothing else. Pass `url` only to point at something other than `/projects/api/projects` — a
  * fixture, a dev proxy prefix.
  *
- * It also installs the **default project scope** — the picked project carried in `?project=` on the
- * current URL, see {@link QueryParamProjectScope}. An application whose own addresses already say
- * which project is on screen overrides that by providing `QITS_PROJECT_SCOPE` *after* this call;
- * qits-spa-projects does exactly that, because there the project id is the first path segment.
+ * It also installs `QITS_REPOSITORIES`, the repositories of whatever project is in scope: the two
+ * reads belong together because the second is only ever about a project from the first. **Which**
+ * project is in scope is not decided here — that is the address's job, so an application says how
+ * deep its own addresses go with `provideQitsScope(...)`.
  *
  * ```ts
  * bootstrapApplication(App, {
- *   providers: [provideHttpClient(), provideRouter(routes), provideQitsNavigation(), provideQitsProjects()],
+ *   providers: [provideHttpClient(), provideRouter(routes), provideQitsNavigation(),
+ *               provideQitsProjects(), provideQitsScope('repository')],
  * });
  * ```
  */
@@ -111,7 +117,7 @@ export function provideQitsProjects(options?: { readonly url?: string }): Enviro
   const url = options?.url ?? QITS_PROJECTS_URL;
   return makeEnvironmentProviders([
     { provide: QITS_PROJECTS, useFactory: () => new HttpProjectsSource(url) },
-    { provide: QITS_PROJECT_SCOPE, useClass: QueryParamProjectScope },
+    provideQitsRepositories(),
   ]);
 }
 
@@ -132,8 +138,5 @@ export function provideQitsProjectList(
     projects: signal<readonly QitsProject[] | undefined>(projects),
     failed: signal(options?.failed ?? false),
   };
-  return makeEnvironmentProviders([
-    { provide: QITS_PROJECTS, useValue: source },
-    { provide: QITS_PROJECT_SCOPE, useClass: QueryParamProjectScope },
-  ]);
+  return makeEnvironmentProviders([{ provide: QITS_PROJECTS, useValue: source }]);
 }

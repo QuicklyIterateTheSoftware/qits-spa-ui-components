@@ -9,10 +9,21 @@ export { QitsMainLayout } from './lib/main-layout';
 export {
   provideQitsNavigation,
   provideQitsNavigationLinks,
+  provideQitsNavigationTree,
+  QITS_NAV_SLOTS,
   QITS_NAVIGATION,
   QITS_NAVIGATION_URL,
+  toNavTree,
 } from './lib/navigation';
-export type { QitsNavigation, QitsNavigationSource, QitsNavLink } from './lib/navigation';
+export type {
+  QitsNavEntry,
+  QitsNavEntryBody,
+  QitsNavigation,
+  QitsNavigationSource,
+  QitsNavLink,
+  QitsNavSlot,
+  QitsNavTree,
+} from './lib/navigation';
 export { QitsNavSubmenu, QitsNavSubmenuSlot } from './lib/nav-submenu';
 export {
   provideQitsProjects,
@@ -22,8 +33,24 @@ export {
 } from './lib/projects';
 export type { QitsProject, QitsProjectEntries, QitsProjectsSource } from './lib/projects';
 export {
-  QITS_PROJECT_QUERY_PARAM,
-  QITS_PROJECT_SCOPE,
-  QueryParamProjectScope,
-} from './lib/project-scope';
-export type { QitsProjectScope } from './lib/project-scope';
+  provideQitsRepositories,
+  provideQitsRepositoryList,
+  QITS_REPOSITORIES,
+  QITS_REPOSITORIES_URL,
+} from './lib/repositories';
+export type {
+  QitsRepositoriesSource,
+  QitsRepository,
+  QitsRepositoryEntries,
+} from './lib/repositories';
+export {
+  parseScope,
+  provideQitsScope,
+  QITS_CATEGORIES,
+  QITS_SCOPE,
+  scopeCommands,
+  scopePath,
+  UrlScope,
+} from './lib/scope';
+export type { QitsCategory, QitsRouting, QitsScope, QitsScopeSource } from './lib/scope';
+export { QitsAppLinks, QITS_BROWSER_ORIGIN } from './lib/app-links';
