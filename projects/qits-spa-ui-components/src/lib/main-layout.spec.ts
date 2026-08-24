@@ -2,11 +2,20 @@ import { provideLocationMocks } from '@angular/common/testing';
 import { Component, signal, viewChild, type TemplateRef } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
+
+import { QITS_BROWSER_ORIGIN } from './app-links';
 import { QitsMainLayout } from './main-layout';
 import { QitsNavSubmenuSlot } from './nav-submenu';
-import { provideQitsNavigationLinks, QITS_NAVIGATION, type QitsNavLink } from './navigation';
-import { QITS_PROJECT_SCOPE, QueryParamProjectScope } from './project-scope';
+import {
+  provideQitsNavigationLinks,
+  provideQitsNavigationTree,
+  QITS_NAVIGATION,
+  type QitsNavigation,
+  type QitsNavLink,
+} from './navigation';
 import { provideQitsProjectList, QITS_PROJECTS, type QitsProject } from './projects';
+import { provideQitsRepositoryList, QITS_REPOSITORIES, type QitsRepository } from './repositories';
+import { provideQitsScope, type QitsRouting } from './scope';
 
 describe('QitsMainLayout', () => {
   const PLATFORM: readonly QitsNavLink[] = [
@@ -17,7 +26,7 @@ describe('QitsMainLayout', () => {
 
   /**
    * The layout hosts a `<router-outlet />`, so it needs a router even with nothing to route to.
-   * The literal source stands in for the gateway: nothing is fetched, so there is no request to
+   * The literal source stands in for the edge: nothing is fetched, so there is no request to
    * flush before an assertion and no pending task to wait on.
    */
   function render(links: readonly QitsNavLink[] = PLATFORM): ComponentFixture<QitsMainLayout> {
@@ -43,12 +52,50 @@ describe('QitsMainLayout', () => {
     ] as HTMLAnchorElement[];
   }
 
-  it('renders what the navigation source gives it, as plain hrefs', () => {
-    const anchors = links(render());
-    expect(anchors.map((a) => a.textContent?.trim())).toEqual(['Home', 'CI', 'Docs']);
-    expect(anchors.map((a) => a.getAttribute('href'))).toEqual(PLATFORM.map((link) => link.href));
-    // routerLink would compile and go nowhere: these destinations are other applications.
-    expect(anchors.some((a) => a.hasAttribute('ng-reflect-router-link'))).toBe(false);
+  function labels(fixture: ComponentFixture<unknown>): (string | undefined)[] {
+    return links(fixture).map((a) => a.textContent?.trim());
+  }
+
+  function headings(fixture: ComponentFixture<unknown>): (string | undefined)[] {
+    return [...fixture.nativeElement.querySelectorAll('.qits-layout-heading')].map((p) =>
+      (p as HTMLElement).textContent?.trim(),
+    );
+  }
+
+  function current(fixture: ComponentFixture<unknown>): (string | undefined)[] {
+    return links(fixture)
+      .filter((a) => a.getAttribute('aria-current') === 'page')
+      .map((a) => a.textContent?.trim());
+  }
+
+  describe('the flat shape an edge without slots answers', () => {
+    it('renders what the navigation source gives it, as plain hrefs', () => {
+      const anchors = links(render());
+      expect(anchors.map((a) => a.textContent?.trim())).toEqual(['Home', 'CI', 'Docs']);
+      expect(anchors.map((a) => a.getAttribute('href'))).toEqual(PLATFORM.map((link) => link.href));
+      // routerLink would compile and go nowhere: these destinations are other applications.
+      expect(anchors.some((a) => a.hasAttribute('ng-reflect-router-link'))).toBe(false);
+    });
+
+    it('marks the link matching the document base as the current page, and only that one', () => {
+      const fixture = render();
+      // jsdom serves the specs from the site root, so Home is the app we are in.
+      expect(current(fixture)).toEqual(['Home']);
+      expect(links(fixture)[0].classList).toContain('qits-layout-link-current');
+      expect(links(fixture)[1].getAttribute('aria-current')).toBeNull();
+    });
+
+    it('lets a non-empty [links] beat the source outright', () => {
+      const fixture = render();
+      fixture.componentRef.setInput('links', [{ label: 'Docs', href: '/docs/' }]);
+      fixture.detectChanges();
+      expect(labels(fixture)).toEqual(['Docs']);
+
+      // Empty is the default, not an override: the source comes back rather than the nav emptying.
+      fixture.componentRef.setInput('links', []);
+      fixture.detectChanges();
+      expect(labels(fixture)).toEqual(['Home', 'CI', 'Docs']);
+    });
   });
 
   it('brands the bar, defaulting to qits, and names the nav after it', () => {
@@ -64,26 +111,11 @@ describe('QitsMainLayout', () => {
     expect(nav.getAttribute('aria-label')).toBe('qits ci navigation');
   });
 
-  it('lets a non-empty [links] beat the source outright', () => {
-    const fixture = render();
-    fixture.componentRef.setInput('links', [{ label: 'Docs', href: '/docs/' }]);
-    fixture.detectChanges();
-    expect(links(fixture).map((a) => a.textContent?.trim())).toEqual(['Docs']);
-
-    // Empty is the default, not an override: the source comes back rather than the nav emptying.
-    fixture.componentRef.setInput('links', []);
-    fixture.detectChanges();
-    expect(links(fixture).map((a) => a.textContent?.trim())).toEqual(['Home', 'CI', 'Docs']);
-  });
-
   it('renders nothing and says it is busy until the source answers', () => {
     TestBed.configureTestingModule({
       providers: [
         provideRouter([]),
-        {
-          provide: QITS_NAVIGATION,
-          useValue: { links: signal(undefined), failed: signal(false) },
-        },
+        { provide: QITS_NAVIGATION, useValue: { tree: signal(undefined), failed: signal(false) } },
       ],
     });
     const fixture = TestBed.createComponent(QitsMainLayout);
@@ -104,7 +136,7 @@ describe('QitsMainLayout', () => {
     expect(fixture.nativeElement.querySelector('.qits-layout-stranded')?.textContent).toBe(
       'Navigation unavailable',
     );
-    // `/` is the gateway's own root, not a registry entry, so this fallback cannot go stale.
+    // `/` is the platform's own root, not a registry entry, so this fallback cannot go stale.
     expect(escape.getAttribute('href')).toBe('/');
   });
 
@@ -152,34 +184,296 @@ describe('QitsMainLayout', () => {
     expect(fixture.nativeElement.querySelector('.qits-layout-nav-open')).toBeNull();
   });
 
-  it('marks the link matching the document base as the current page, and only that one', () => {
-    const fixture = render();
-    // jsdom serves the specs from the site root, so Home is the app we are in.
-    const current = links(fixture).filter((a) => a.getAttribute('aria-current') === 'page');
-    expect(current.map((a) => a.textContent?.trim())).toEqual(['Home']);
-    expect(current[0].classList).toContain('qits-layout-link-current');
-    expect(links(fixture)[1].getAttribute('aria-current')).toBeNull();
-  });
-
   it('mounts the outlet the child routes render into', () => {
     const fixture = render();
     const content = fixture.nativeElement.querySelector('main.qits-layout-content') as HTMLElement;
     expect(content.querySelector('router-outlet')).not.toBeNull();
   });
 
-  describe('the sub-menu slot', () => {
-    /** Two templates, so the stack can be exercised without a second component. */
-    @Component({
-      template: `
-        <ng-template #first><a class="spec-submenu-link" href="/ci/guide/">First</a></ng-template>
-        <ng-template #second><span class="spec-second">Second</span></ng-template>
-      `,
-    })
-    class Templates {
-      readonly first = viewChild.required<TemplateRef<unknown>>('first');
-      readonly second = viewChild.required<TemplateRef<unknown>>('second');
+  /**
+   * The nested sidebar: what the platform serves, filed under what the address says is on screen.
+   * Not "does the navigation work" — that is `toNavTree`'s and `QitsAppLinks`' own specs — but the
+   * shape this layout builds out of the three reads.
+   */
+  describe('the scoped sidebar', () => {
+    @Component({ template: '' })
+    class Blank {}
+
+    const PROJECTS_ORIGIN = 'https://projects.dev.example.com';
+    const CI_ORIGIN = 'https://ci.dev.example.com';
+
+    const TREE: QitsNavigation = {
+      environment: 'dev',
+      origin: 'https://dev.example.com',
+      slots: {
+        system: [
+          {
+            app: 'qits-projects',
+            label: 'Overview',
+            host: 'projects',
+            origin: PROJECTS_ORIGIN,
+            position: 1,
+          },
+          {
+            app: 'qits-platform-system',
+            label: 'System',
+            host: 'system',
+            origin: 'https://system.dev.example.com',
+            position: 4,
+          },
+        ],
+        platform: [
+          {
+            app: 'qits-platform-events',
+            label: 'Events',
+            host: 'events',
+            origin: 'https://events.dev.example.com',
+            position: 1,
+          },
+        ],
+        'project.detail': [
+          {
+            app: 'qits-workspaces',
+            label: 'Workspaces',
+            host: 'workspaces',
+            origin: 'https://workspaces.dev.example.com',
+            position: 1,
+          },
+        ],
+        'services.details': [
+          { app: 'qits-ci', label: 'CI', host: 'ci', origin: CI_ORIGIN, position: 2 },
+          {
+            app: 'qits-docs',
+            label: 'Docs',
+            host: 'docs',
+            origin: 'https://docs.dev.example.com',
+            position: 1,
+          },
+        ],
+        'libs.details': [
+          {
+            app: 'qits-docs',
+            label: 'Docs',
+            host: 'docs',
+            origin: 'https://docs.dev.example.com',
+            position: 1,
+          },
+        ],
+      },
+    };
+
+    const PROJECTS: readonly QitsProject[] = [
+      { id: 'p1', slug: 'qits', name: 'qits' },
+      { id: 'p2', slug: 'payments', name: 'Payments' },
+    ];
+
+    const REPOSITORIES: readonly QitsRepository[] = [
+      { id: 'r1', name: 'qits-ci', category: 'services' },
+      { id: 'r2', name: 'qits-projects', category: 'services' },
+      { id: 'r3', name: 'qits-eventstream', category: 'libs' },
+      { id: 'r4', name: 'qits-qits', category: undefined },
+    ];
+
+    async function renderTree(options?: {
+      readonly url?: string;
+      readonly browserOrigin?: string;
+      readonly routing?: QitsRouting;
+      readonly repositories?: readonly QitsRepository[];
+      readonly repositoriesFailed?: boolean;
+      readonly pendingRepositories?: boolean;
+    }): Promise<ComponentFixture<QitsMainLayout>> {
+      TestBed.configureTestingModule({
+        providers: [
+          provideRouter([{ path: '**', component: Blank }]),
+          provideLocationMocks(),
+          provideQitsNavigationTree(TREE),
+          provideQitsProjectList(PROJECTS),
+          options?.pendingRepositories
+            ? {
+                provide: QITS_REPOSITORIES,
+                useValue: {
+                  repositories: signal<readonly QitsRepository[] | undefined>(undefined),
+                  wrapperRepositoryId: signal(undefined),
+                  failed: signal(false),
+                },
+              }
+            : provideQitsRepositoryList(options?.repositories ?? REPOSITORIES, 'r9', {
+                failed: options?.repositoriesFailed,
+              }),
+          provideQitsScope(options?.routing ?? 'repository'),
+          { provide: QITS_BROWSER_ORIGIN, useValue: options?.browserOrigin ?? PROJECTS_ORIGIN },
+        ],
+      });
+      await TestBed.inject(Router).navigateByUrl(options?.url ?? '/');
+      const fixture = TestBed.createComponent(QitsMainLayout);
+      fixture.detectChanges();
+      return fixture;
     }
 
+    it('shows only the platform-wide group while no project is in scope', async () => {
+      const fixture = await renderTree();
+      // No project: no Project node, no repository groups, and PLATFORM is about a project.
+      expect(headings(fixture)).toEqual(['SYSTEM']);
+      expect(labels(fixture)).toEqual(['Overview', 'System']);
+    });
+
+    it('draws the project, its repositories by group, then the platform-wide groups', async () => {
+      const fixture = await renderTree({ url: '/qits/' });
+
+      expect(headings(fixture)).toEqual(['SERVICES', 'LIBS', 'PLATFORM', 'SYSTEM']);
+      expect(labels(fixture)).toEqual([
+        'Project',
+        'Project setup',
+        'Workspaces',
+        'qits-ci',
+        'qits-projects',
+        'qits-eventstream',
+        'Events',
+        'Overview',
+        'System',
+      ]);
+      // A repository of an archetype this library does not group is left out rather than guessed at.
+      expect(labels(fixture)).not.toContain('qits-qits');
+    });
+
+    it('addresses every row on the host that serves it', async () => {
+      const fixture = await renderTree({ url: '/qits/' });
+      const href = (label: string) =>
+        links(fixture)
+          .find((a) => a.textContent?.trim() === label)
+          ?.getAttribute('href');
+
+      expect(href('Project')).toBe(`${PROJECTS_ORIGIN}/qits/`);
+      expect(href('Project setup')).toBe(`${PROJECTS_ORIGIN}/qits/project-setup`);
+      expect(href('Workspaces')).toBe('https://workspaces.dev.example.com/qits/');
+      expect(href('qits-ci')).toBe(`${PROJECTS_ORIGIN}/qits/services/qits-ci/`);
+      expect(href('Events')).toBe('https://events.dev.example.com/qits/');
+      expect(href('System')).toBe('https://system.dev.example.com/');
+    });
+
+    it('is the Project itself on the projects host, with no category in scope', async () => {
+      const fixture = await renderTree({ url: '/qits/' });
+      expect(current(fixture)).toEqual(['Project']);
+    });
+
+    it('opens the repository in scope, and only that one', async () => {
+      const fixture = await renderTree({ url: '/qits/services/qits-ci/' });
+
+      expect(labels(fixture)).toEqual([
+        'Project',
+        'Project setup',
+        'Workspaces',
+        'qits-ci',
+        'Docs',
+        'CI',
+        'qits-projects',
+        'qits-eventstream',
+        'Events',
+        'Overview',
+        'System',
+      ]);
+      // The open row's children are the entries of *its* category, in the platform's order.
+      const children = links(fixture).filter((a) => a.classList.contains('qits-layout-link-child'));
+      expect(children.map((a) => a.textContent?.trim())).toEqual([
+        'Project setup',
+        'Workspaces',
+        'Docs',
+        'CI',
+      ]);
+      expect(current(fixture)).toEqual(['qits-ci']);
+    });
+
+    it('marks the entry whose host the reader is on, inside the repository in scope', async () => {
+      const fixture = await renderTree({
+        url: '/qits/services/qits-ci/runs/7',
+        browserOrigin: CI_ORIGIN,
+      });
+
+      // On the ci host the repository row is a link away, and the CI entry is the page.
+      expect(current(fixture)).toEqual(['CI']);
+      expect(
+        links(fixture)
+          .find((a) => a.textContent?.trim() === 'CI')
+          ?.getAttribute('href'),
+      ).toBe(`${CI_ORIGIN}/qits/services/qits-ci/`);
+    });
+
+    it('says the repositories are still coming, rather than drawing no groups', async () => {
+      const fixture = await renderTree({ url: '/qits/', pendingRepositories: true });
+      expect(fixture.nativeElement.querySelector('.qits-layout-note')?.textContent).toContain(
+        'Loading repositories',
+      );
+      expect(headings(fixture)).toEqual(['PLATFORM', 'SYSTEM']);
+    });
+
+    it('says the repository read failed, out loud', async () => {
+      const fixture = await renderTree({
+        url: '/qits/',
+        repositories: [],
+        repositoriesFailed: true,
+      });
+      const alert = fixture.nativeElement.querySelector('.qits-layout-alert') as HTMLElement;
+      expect(alert.getAttribute('role')).toBe('alert');
+      expect(alert.textContent).toContain('Could not load repositories');
+    });
+
+    /** PLATFORM is a group *about a project*, so it has nothing to say while none is open. */
+    it('hides the project-scoped group where no project is in scope', async () => {
+      expect(headings(await renderTree({ url: '/' }))).not.toContain('PLATFORM');
+    });
+
+    it('shows the project-scoped group once a project is', async () => {
+      expect(headings(await renderTree({ url: '/qits/' }))).toContain('PLATFORM');
+    });
+
+    it('hangs the sub-menu under the row that is the page', async () => {
+      const fixture = await renderTree({
+        url: '/qits/services/qits-ci/runs/7',
+        browserOrigin: CI_ORIGIN,
+      });
+      const templates = TestBed.createComponent(Templates);
+      templates.detectChanges();
+      TestBed.inject(QitsNavSubmenuSlot).register(templates.componentInstance.first());
+      fixture.detectChanges();
+
+      const items = [...fixture.nativeElement.querySelectorAll('.qits-layout-links > li')];
+      const owner = items.find((li) => (li as HTMLElement).querySelector('.qits-layout-submenu'));
+      expect((owner as HTMLElement).querySelector('.qits-layout-link')?.textContent?.trim()).toBe(
+        'CI',
+      );
+      expect(fixture.nativeElement.querySelector('.qits-layout-submenu-detached')).toBeNull();
+    });
+
+    it('detaches the sub-menu where no row is the page', async () => {
+      // A host that serves none of these applications: a bare `ng serve`, or one not flipped yet.
+      const fixture = await renderTree({
+        url: '/qits/services/qits-ci/',
+        browserOrigin: 'https://nowhere.example.com',
+      });
+      const templates = TestBed.createComponent(Templates);
+      templates.detectChanges();
+      TestBed.inject(QitsNavSubmenuSlot).register(templates.componentInstance.first());
+      fixture.detectChanges();
+
+      expect(current(fixture)).toEqual([]);
+      expect(fixture.nativeElement.querySelector('.qits-layout-submenu-detached')).not.toBeNull();
+      expect(fixture.nativeElement.querySelectorAll('.qits-layout-submenu')).toHaveLength(1);
+    });
+  });
+
+  /** Two templates, so the stack can be exercised without a second component. */
+  @Component({
+    template: `
+      <ng-template #first><a class="spec-submenu-link" href="/ci/guide/">First</a></ng-template>
+      <ng-template #second><span class="spec-second">Second</span></ng-template>
+    `,
+  })
+  class Templates {
+    readonly first = viewChild.required<TemplateRef<unknown>>('first');
+    readonly second = viewChild.required<TemplateRef<unknown>>('second');
+  }
+
+  describe('the sub-menu slot', () => {
     function templates(): Templates {
       const fixture = TestBed.createComponent(Templates);
       fixture.detectChanges();
@@ -205,7 +499,7 @@ describe('QitsMainLayout', () => {
 
     it('falls to the foot of the nav when no entry is this application', () => {
       // Nothing here matches jsdom's `/` base, which is also a bare `ng serve` or an app the
-      // gateway does not route yet.
+      // platform does not serve yet.
       const fixture = render([{ label: 'CI', href: '/ci/' }]);
       TestBed.inject(QitsNavSubmenuSlot).register(templates().first());
       fixture.detectChanges();
@@ -263,8 +557,8 @@ describe('QitsMainLayout', () => {
     class Blank {}
 
     const PROJECTS: readonly QitsProject[] = [
-      { id: 'p1', name: 'One' },
-      { id: 'p2', name: 'Two' },
+      { id: 'p1', slug: 'one', name: 'One' },
+      { id: 'p2', slug: 'two', name: 'Two' },
     ];
 
     function renderProjects(
@@ -277,6 +571,7 @@ describe('QitsMainLayout', () => {
           provideLocationMocks(),
           provideQitsNavigationLinks(PLATFORM),
           provideQitsProjectList(projects, options),
+          provideQitsScope('project'),
         ],
       });
       const fixture = TestBed.createComponent(QitsMainLayout);
@@ -352,7 +647,7 @@ describe('QitsMainLayout', () => {
               failed: signal(false),
             },
           },
-          { provide: QITS_PROJECT_SCOPE, useClass: QueryParamProjectScope },
+          provideQitsScope('project'),
         ],
       });
       const fixture = TestBed.createComponent(QitsMainLayout);
@@ -373,49 +668,48 @@ describe('QitsMainLayout', () => {
       expect(note.getAttribute('role')).toBe('alert');
     });
 
-    it('shows the project the scope reports, with nothing chosen by default', async () => {
+    it('shows the project the address names, with nothing chosen by default', async () => {
       const fixture = renderProjects();
       expect(pill(fixture)).toBeNull();
 
-      await TestBed.inject(Router).navigate([], { queryParams: { project: 'p2' } });
+      await TestBed.inject(Router).navigateByUrl('/two/');
       fixture.detectChanges();
 
       expect(pill(fixture)).toBe('Two');
     });
 
-    /** The default scope rewrites one parameter and keeps the page: a pick is not also a departure. */
-    it('hands a pick to the scope, which lands in the URL beside the path', async () => {
+    /** A pick is a navigation: the project is the first segment, so picking one goes there. */
+    it('hands a pick to the scope, which takes the reader to the project', async () => {
       const fixture = renderProjects();
       const router = TestBed.inject(Router);
-      await router.navigate(['/runs/7']);
+      await router.navigateByUrl('/runs/7');
       fixture.detectChanges();
 
       optionRows(fixture)[0].click();
       await settle(fixture);
 
-      expect(router.url).toBe('/runs/7?project=p1');
+      expect(router.url.replace(/\/$/, '')).toBe('/one');
       expect(pill(fixture)).toBe('One');
     });
 
-    it('drops the parameter again when the pick is cleared', async () => {
+    it('goes back to the root of this host when the pick is cleared', async () => {
       const fixture = renderProjects();
       const router = TestBed.inject(Router);
-      await router.navigate(['/runs/7'], { queryParams: { project: 'p1', tab: 'log' } });
+      await router.navigateByUrl('/two/');
       fixture.detectChanges();
 
       fixture.nativeElement.querySelector('.qits-picker-clear').click();
       await settle(fixture);
 
-      // Only this parameter: the rest of the address is not the picker's to edit.
-      expect(router.url).toBe('/runs/7?tab=log');
+      expect(router.url).toBe('/');
       expect(pill(fixture)).toBeNull();
     });
 
     /** No option, no label — so the choices come back rather than a pill the picker cannot draw. */
-    it('shows the options again for a scope naming a project the list does not contain', async () => {
+    it('shows the options again for an address naming a project the list does not contain', async () => {
       const fixture = renderProjects();
 
-      await TestBed.inject(Router).navigate([], { queryParams: { project: 'gone' } });
+      await TestBed.inject(Router).navigateByUrl('/gone/services/qits-ci/');
       fixture.detectChanges();
 
       expect(pill(fixture)).toBeNull();

@@ -8,20 +8,18 @@ Nothing here fetches or stores: a component that needed data would belong to the
 **One exception, and only one: `QitsMainLayout` asks the platform what the platform contains.** The
 rule holds because it is about _ownership_ — a component must not go looking for data some
 application already has. The chrome is the case where no application has it. What the platform
-routes is known to the gateway and to nothing else; each SPA knows only itself. So the navigation
-arrives over `QITS_NAVIGATION`, which `provideQitsNavigation()` answers with one `GET
-/main-navigation`, and the project list over `QITS_PROJECTS`, which `provideQitsProjects()` answers
-with one `GET /projects/api/projects`. Everything else in this package still takes what it renders
-as an input.
+serves is known to the edge and to nothing else; what a project holds is known to qits-projects; and
+each SPA knows only itself. So the chrome makes three reads, and everything else in this package
+still takes what it renders as an input.
 
-| Component        | Selector             | What it is                                                                                                                                                                                                                       |
-| ---------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Component        | Selector             | What it is                                                                                                                                                                                                                      |
+| ---------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `QitsButton`     | `<qits-button>`      | The button. `variant` (`primary`/`secondary`/`ghost`), `size` (`sm`/`md`/`lg`), `type`, `disabled`, `busy`; emits `pressed`.                                                                                                     |
 | `QitsBadge`      | `<qits-badge>`       | A short status word. Required `label`, semantic `tone` (`neutral`/`info`/`success`/`warning`/`danger`).                                                                                                                          |
 | `QitsCard`       | `<qits-card>`        | A titled surface. `heading`, `subheading`, `elevated`; projects into the body, and `[qitsCardActions]` into the header.                                                                                                          |
 | `QitsPicker`     | `<qits-picker>`      | Pick one of a list. Required `options` (`{ value: T, label: string }[]`), two-way `value` of `T \| undefined`; `compareWith`, `placeholder`, `disabled`.                                                                         |
-| `QitsMainLayout` | `<qits-main-layout>` | The application skeleton. `brand` (the top-left fallback when no project picker is wired), `links` (an override; the navigation comes from `QITS_NAVIGATION`); holds the `<router-outlet />` the app's child routes render into. |
-| `QitsNavSubmenu` | `[qitsNavSubmenu]`   | Marks an `<ng-template>` as the sub-menu under the current navigation entry. The layout gives it a box; the app styles what goes in it.                                                                                          |
+| `QitsMainLayout` | `<qits-main-layout>` | The application skeleton: the project picker, the nested sidebar, and the `<router-outlet />` the app's child routes render into. `brand` is the top-left fallback; `links` an override in the flat shape.                        |
+| `QitsNavSubmenu` | `[qitsNavSubmenu]`   | Marks an `<ng-template>` as the sub-menu under the current navigation row. The layout gives it a box; the app styles what goes in it.                                                                                            |
 
 `busy` is separate from `disabled` on purpose: both stop a press, but only `busy` sets
 `aria-busy`, so a host can say "working…" without also claiming the action is unavailable. Tones
@@ -53,6 +51,139 @@ const environments: QitsPickerOption<Env>[] = [
 given. The rows follow the ARIA listbox pattern: the list is one tab stop, arrows and `Home`/`End`
 move the caret, `Enter` picks.
 
+## The URL is the single source of truth
+
+Every service on this platform is its own host, and every SPA under it shares one grammar:
+
+    https://<app>.<env>.<domain>/<projectSlug>/<category>/<repoName>/…   a repository
+    https://<app>.<env>.<domain>/<projectSlug>/…                         a project
+    https://<app>.<env>.<domain>/…                                       the platform
+
+The six categories are `services daemons libs frontends cli images`. `parseScope` reads that
+grammar and nothing else:
+
+```ts
+parseScope('/qits/services/qits-ci/runs/1'); // { project: 'qits', category: 'services', repository: 'qits-ci' }
+parseScope('/traces'); //                       {} — an application's own page
+parseScope('/qits/epics/1', knownSlugs); //     { project: 'qits' } — because the platform has that slug
+```
+
+**Segment one is a project only when the URL proves it**: either segment two is a category, or the
+project list the chrome already loaded contains the slug. That rule is what lets every SPA keep its
+own top-level routes. A project is never a category either, so `/services` stays this app's own
+page — and qits-projects refuses a slug that spells a category or a routed segment, so the two
+vocabularies cannot collide from the other side.
+
+`scopePath(scope)` gives the directory form (`/`, `/qits/`, `/qits/services/qits-ci/`) and
+`scopeCommands(scope)` the same prefix as router commands, for an in-app absolute link:
+
+```ts
+router.navigate([...scopeCommands(scope()), 'runs', id]);
+```
+
+Both are pure functions of a `QitsScope`, so a route guard, a spec and the chrome answer the same
+question the same way.
+
+## The three reads
+
+```ts
+bootstrapApplication(App, {
+  providers: [
+    provideHttpClient(),
+    provideRouter(routes),
+    provideQitsNavigation(), //   GET /main-navigation        — what the platform serves
+    provideQitsProjects(), //     GET /projects/api/projects  — and its repositories, per project
+    provideQitsScope('repository'), // the address, as this application routes it
+  ],
+});
+```
+
+All three URLs are **absolute**, deliberately unlike the platform's `api/config.json` convention of
+a SPA reading from its own backend. Every SPA is served same-origin behind the edge, so an absolute
+path is not a shortcut: it is what carries the browser's session cookie to the service that owns the
+answer, with no machine token and no CORS pre-flight. A SPA asking its own backend would be asking a
+service that knows what it does and nothing about what is deployed beside it.
+
+**`provideQitsNavigation()`** issues one `GET /main-navigation` for the life of the application. The
+edge answers with slots — one entry per application, filed under where it belongs in the chrome:
+
+```json
+{
+  "environment": "dev",
+  "origin": "https://dev.example.com",
+  "slots": {
+    "system": [{ "app": "qits-projects", "label": "Overview", "host": "projects", "origin": "https://projects.dev.example.com", "position": 1 }],
+    "platform": [{ "app": "qits-platform-events", "label": "Events", "host": "events", "origin": "https://events.dev.example.com", "position": 1 }],
+    "project.detail": [{ "app": "qits-workspaces", "label": "Workspaces", "host": "workspaces", "origin": "https://workspaces.dev.example.com", "position": 1 }],
+    "services.details": [{ "app": "qits-ci", "label": "CI", "host": "ci", "origin": "https://ci.dev.example.com", "position": 2 }]
+  }
+}
+```
+
+`HttpNavigationSource` normalises that into a `QitsNavTree`: every slot flattened into one list
+sorted by position then label, each entry carrying its slot, plus the environment origin. An edge
+that predates slots answers the flat `{"links":[…]}` shape instead, and the tree carries it as
+`legacy` — set **only** when no slots were served, because the two are exclusive: `legacy` means
+"this platform cannot tell me its shape", and the sidebar then draws the flat list it always drew.
+
+`provideQitsNavigationTree(payload)` and `provideQitsNavigationLinks([…])` answer the same contract
+from a literal — specs, stories, an `ng serve` with no platform in front of it. Nothing is fetched,
+so there is no request to flush and no pending task to wait on.
+
+**`provideQitsProjects()`** issues one `GET /projects/api/projects` and installs
+`QITS_REPOSITORIES` beside it: the repositories of whatever project is in scope, one `GET
+/projects/api/projects/{id}/repositories` per project and none at all while none is open. Leaving a
+project cancels a read still in flight. The archetype table — `SERVICE`→`services`,
+`DAEMON`→`daemons`, `LIBRARY`→`libs`, `FRONTEND`→`frontends`, `CLI`→`cli`, `IMAGE`→`images` — is
+**copied** here rather than imported: this library depends on no qits module, and a repository whose
+archetype it does not know is left out of the groups rather than filed under a guess.
+`provideQitsProjectList([…])` and `provideQitsRepositoryList([…], wrapperId)` are the literal forms.
+
+**`provideQitsScope(routing)`** installs `UrlScope`, which reads the address and nothing else — no
+storage, deliberately. A remembered pick would make the same URL render differently for two people
+and would silently re-scope a page opened from a bookmark. `routing` says how deep this
+application's own addresses go:
+
+| `routing`      | the applications                            | what a pick does                           |
+| -------------- | ------------------------------------------- | ------------------------------------------ |
+| `'repository'` | ci, docs, artifacts, configuration, workspaces | goes to `/<slug>/` on this host          |
+| `'project'`    | events, deployments, observability, maintenance | goes to `/<slug>/` on this host         |
+| `'system'`     | mirror, orchestrator, system, githost       | **leaves** for the projects host           |
+
+A system app is about the platform rather than about a project, so `/<slug>/` is not an address it
+serves; leaving is the honest answer to a pick it cannot act on itself. There is deliberately no
+setter that only remembers: `select` navigates, so the URL stays the single statement of what is on
+screen and the back button cannot disagree with the pill.
+
+The scope also resolves what the API needs: `projectId()` maps the slug through the project list,
+`repositoryId()` maps the repository name through the repository list. URLs name slugs, services
+resolve ids, and this is where the two meet.
+
+## Linking to another application
+
+```ts
+const appLinks = inject(QitsAppLinks); // providedIn: 'root'
+
+appLinks.href('qits-ci', '', scope()); //            https://ci.dev.example.com/qits/services/qits-ci/
+appLinks.href('qits-ci', 'runs/7', { project }); //  https://ci.dev.example.com/qits/runs/7
+appLinks.origin('qits-artifacts'); //                undefined — no host of its own yet
+appLinks.environmentOrigin(); //                     https://dev.example.com — clone URLs live here
+```
+
+`href` is the origin from the navigation, the scope path, then the path. An application the platform
+does **not** serve on a host of its own has no address here, and says so with `undefined` rather
+than inventing one — pass `legacyFallback` (its old path segment, `'/artifacts/'`) to reach it under
+the environment origin instead. The scope is dropped for that form: an unflipped application has no
+scoped address, and spelling one would produce a URL that 404s.
+
+`entries(slot)` reads one slot, and `isCurrent(entry, scope)` says whether an entry is the page on
+screen — **host and path together**. The host alone would mark every entry of an application current
+wherever the reader is inside it; the path alone would mark the ci entry current on the docs host,
+because both spell the same repository path. `QITS_BROWSER_ORIGIN` is the seam a spec replaces to
+say "we are on the ci host"; its factory reads the document, so a server render has an answer too.
+
+## The layout
+
 `QitsMainLayout` is the one component with a peer beyond `@angular/core` and `@angular/common`: it
 renders a `<router-outlet />`, so `@angular/router` is a peer too. Mount it as the root _route_
 component, never as a tag around your content —
@@ -63,105 +194,57 @@ export const routes: Routes = [{ path: '', component: QitsMainLayout, children: 
 
 — and the chrome survives navigation while only the outlet changes. Its breakpoint is CSS, not a
 media query in TypeScript: a persistent sidebar from 768px up, a burger in the top bar below it,
-and the burger is the only state the component keeps. The entries are plain `<a href>` paths rather
-than routes, because every destination is a _different_ Angular application behind its own base
-path — `routerLink` would compile and go nowhere. The entry matching the app's own
-`document.baseURI` is marked `aria-current="page"`.
+and the burger is the only state the component keeps.
 
-### Where the links come from
+The sidebar, top to bottom, is what the three reads make possible:
 
-```ts
-bootstrapApplication(App, {
-  providers: [provideHttpClient(), provideRouter(routes), provideQitsNavigation()],
-});
-```
+- **the project picker** in the top-left slot, its value the project slug;
+- **Project**, when a project is in scope — the project's own page on qits-projects, with "Project
+  setup" and the `project.detail` entries under it;
+- **one group per category that has repositories** — SERVICES, DAEMONS, LIBS, FRONTENDS, CLI,
+  IMAGES — one row per repository, and under the repository **in scope** the `<category>.details`
+  entries. Only the repository in scope opens: a tree that opened every repository would be as long
+  as the project is big and would say nothing about where the reader is;
+- **PLATFORM**, the `platform` entries, hidden while no project is in scope, because the group is
+  about one;
+- **SYSTEM**, the `system` entries, which are about the platform itself.
 
-`provideQitsNavigation()` issues one `GET /main-navigation` for the life of the application and
-gives the answer — `{"links":[{"label":"Home","href":"/"},…]}` — to the layout. The URL is
-**absolute**, deliberately unlike the platform's `api/config.json` convention of a SPA reading from
-its own backend: the gateway is the only process that knows what the platform routes, and the only
-one with no path segment of its own. It requires `provideHttpClient()`; it provides nothing else.
+At most one row is marked current, and it is the most specific: the rows are built deepest-first and
+the first current one wins. Two rows claiming the page would be two answers to "where am I", and the
+sub-menu would have two places to go.
 
-`provideQitsNavigationLinks([…])` answers the same contract from a literal, for specs, stories and
-an `ng serve` with no gateway in front of it. Nothing is fetched, so there is no request to flush
-and no pending task to wait on.
+The links leave the SPA on purpose. Each destination is its own Angular application on its own host,
+so they are plain `<a href>` full-document navigations — `routerLink` would look right and go
+nowhere. That holds for the repository rows too: they address qits-projects, not this app.
 
-Three states, and no compiled-in list behind any of them:
+Four states, and no compiled-in list behind any of them:
 
-- **waiting** — no entries, and `aria-busy` on the `<nav>`;
-- **answered** — the entries, as above;
+- **waiting** — no rows, and `aria-busy` on the `<nav>`;
+- **answered** — the tree above, or the flat list for a legacy answer;
 - **stranded** (empty answer, request failed, or no provider at all) — one link to `/` under a
-  "Navigation unavailable" line. `/` is the gateway's own root rather than a registry entry, so it
-  is the one destination that cannot go stale.
+  "Navigation unavailable" line. `/` is the platform's own root rather than a registry entry, so it
+  is the one destination that cannot go stale;
+- **repositories still coming** — "Loading repositories…" where the groups will be, and a spoken
+  alert where that read failed.
 
 A fallback list compiled in here would put back the drift this replaced _and hide it_: the chrome
-would sometimes show what the platform routes and sometimes a guess frozen at release time, with
-nothing on screen telling them apart.
+would sometimes show what the platform serves and sometimes a guess frozen at release time, with
+nothing on screen telling them apart. That is also why an entry with **no host of its own** is left
+out of the tree: it is reachable at a path this library was never told, and a guessed segment is
+exactly the compiled-in topology the chrome exists to stop carrying. Such an application appears
+again the moment the platform serves it on a host.
 
-`[links]` is an explicit override. A **non-empty** list wins outright and the source is not
-consulted, which is what lets a story or a spec render the real chrome with no provider anywhere.
-Empty — the default — means "ask".
+`[links]` is an explicit override in the flat shape. A **non-empty** list wins outright and the
+source is not consulted, which is what lets a story or a spec render the real chrome with no
+provider anywhere. Empty — the default — means "ask".
 
-### The top-left slot is the project picker
-
-```ts
-bootstrapApplication(App, {
-  providers: [
-    provideHttpClient(),
-    provideRouter(routes),
-    provideQitsNavigation(),
-    provideQitsProjects(),
-  ],
-});
-```
-
-Every resource this platform holds — a repository, a run, an artifact, a workspace — belongs to a
-project. Which project is being looked at is therefore the outermost fact about a page, not a filter
-inside one, so it sits **above** the links rather than under one of them, and it replaces the
-wordmark rather than sitting beside it: a name that never changes is worth less than the one control
-every page is subordinate to.
-
-`provideQitsProjects()` issues one `GET /projects/api/projects` and fills a `QitsPicker` in the slot.
-The URL is **absolute** for the same reason `/main-navigation` is — every SPA is served same-origin
-behind the edge, so the browser's session cookie reaches qits-projects with no machine token and no
-CORS pre-flight, and no SPA has to ask its own backend about projects it does not own. Three states,
-told apart on purpose: _loading_, _could not load_, and an answer — an empty list and a failed read
-are different facts and a platform with no projects is a discouraging thing to draw by accident.
-
-With nothing picked the picker is its own list (see `QitsPicker` above), so the bar is as tall as
-the projects there are and the links sit beneath it; picking collapses the list into the pill.
-
-**Which project is current is the application's knowledge, not the library's**, so it comes from
-`QITS_PROJECT_SCOPE`:
-
-```ts
-export interface QitsProjectScope {
-  readonly projectId: Signal<string | undefined>;
-  select(projectId: string | undefined): void; // expected to navigate
-}
-```
-
-`provideQitsProjects()` installs `QueryParamProjectScope`, which carries the pick in `?project=` on
-whatever page the reader is already on — the path is kept, so picking a project is not also a
-departure. That is the scope for an app whose own addresses do not name a project yet: the pick
-lands in the URL and its pages ignore it until each one is scoped.
-
-An app whose addresses _do_ name a project overrides it by providing `QITS_PROJECT_SCOPE` **after**
-the call — qits-spa-projects does, because there the project id is the first path segment and
-`?project=` would be a second, weaker spelling of a fact the path already carries. There is
-deliberately no setter that only remembers: `select` navigates, so the URL stays the single
-statement of what is on screen and the back button cannot disagree with the pill.
-
-Both halves are required to render the picker. With a list but no scope the slot keeps the wordmark:
-a control that can neither say what is open nor act on a pick is worse in the most prominent place
-in the chrome than the name it would have replaced. An app that provides neither is unchanged.
-
-`provideQitsProjectList([…])` answers the same contract from a literal — specs, stories, an
-`ng serve` with no platform in front of it — and takes `{ failed: true }` for the unavailable state.
+Both halves of the picker are required. With a list but no scope the slot keeps the wordmark: a
+control that can neither say what is open nor act on a pick is worse in the most prominent place in
+the chrome than the name it would have replaced. An app that provides neither is unchanged.
 
 ### The sub-menu
 
-An application can hang its own menu under its own entry: a documentation tree, a version picker.
+An application can hang its own menu under its own row: a documentation tree, a version picker.
 Declare it **in the app shell, beside the `<router-outlet />`** —
 
 ```html
@@ -172,9 +255,9 @@ Declare it **in the app shell, beside the `<router-outlet />`** —
 rebuilt on every navigation, so the panel would lose its scroll position and every open group on
 each hop, in a menu that did not itself change. The layout renders it in a bare block and styles
 nothing inside it, and the content keeps the shell's style scope, because view encapsulation
-follows where a node is declared rather than where it is inserted. Where no entry is this
-application — the gateway does not route it yet, a bare `ng serve` — the sub-menu goes to the foot
-of the navigation instead of nowhere.
+follows where a node is declared rather than where it is inserted. Where no row is this application
+— the platform does not serve it yet, a bare `ng serve` — the sub-menu goes to the foot of the
+navigation instead of nowhere.
 
 ## Install
 
@@ -285,6 +368,12 @@ it. Like the build it is Vite compiling, not a browser rendering, so the browser
 enough.
 
 ## Releasing
+
+The version in `projects/qits-spa-ui-components/package.json` is stamped by the release door — the
+CalVer that names the release commit and the tag — and never edited by hand. The release pipeline
+below stops when the built manifest and the tag disagree, so a hand-picked number is a red release
+rather than a version. A breaking change is therefore not a different kind of number: it is the next
+CalVer, and what consumers need is the note in _Pinning_ above.
 
 Two pipelines publish, and they publish different things.
 
