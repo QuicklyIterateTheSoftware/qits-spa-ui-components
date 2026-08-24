@@ -89,6 +89,69 @@ interface QitsNavRow {
  * belongs to a project, so which project is being looked at is the outermost thing about a page and
  * not a filter inside one of them. An app that provides no `QITS_PROJECTS` still gets `brand()`
  * there, which is what keeps this a slot rather than a requirement.
+ *
+ * ## How a link gets into the sidebar — and how to add or move one
+ *
+ * Nothing in this package names an application. A row appears here because a deployed service
+ * said where it belongs, and the chain is:
+ *
+ * 1. **The service declares its placements** in `.config/qits/deployments.yml`:
+ *    `navigation-entries: services.details.CI:2, libs.details.CI:2, ...` — a comma list of
+ *    `<slot>.<Label>:<position>`, at most one entry per slot. Slots are a closed vocabulary:
+ *    `services.details` `daemons.details` `libs.details` `frontends.details` `cli.details`
+ *    `images.details` (children of every repository of that category), `project.detail`
+ *    (children of the Project row), `platform` (the PLATFORM group, project scoped) and
+ *    `system` (the SYSTEM group, global). Its host label is `host:` or, by default, the
+ *    application name minus `qits-platform-`/`qits-` (`qits-ci` → `ci`). The old
+ *    `navigation: Label:pos` still parses and means `system`.
+ *    The file travels with the commit: nothing reads it until that commit is built and deployed.
+ * 2. **A release carries it to the platform.** The release door (qits-workspaces) pushes the
+ *    release commit onto `main` and the deploy branch (`environment/<env>`); qits-githost
+ *    announces the push (`SCMPublishCommit`); qits-ci runs the repository's
+ *    `.config/qits/ci-post-receive.yml` at that sha and, when the build is green, publishes
+ *    `BuildSuccessful` on the event bus.
+ * 3. **qits-platform-deployments deploys it and announces the placements.** A durable consumer
+ *    of `BuildSuccessful` reads `.config/qits/deployments.yml` FROM THE GIT HOST AT THE BUILT
+ *    SHA (`SpecSource`/`DeploymentSpecParser`), starts the container, waits for its health
+ *    gate, and only then publishes `DeploymentActive` — routes (`endpoints`), `browserHost`
+ *    and `navigation` (slot, label, position). An unknown key in the file fails the deployment,
+ *    which is why the parser release precedes any file that uses a new key.
+ * 4. **qits-platform-edge projects it.** A durable consumer of `DeploymentActive` (replayed
+ *    from the epoch at every edge boot) keeps the newest frame per (environment, application)
+ *    in `edge_deployment_snapshot` / `edge_endpoint` / `edge_navigation_entry`; `GET
+ *    /main-navigation`, answered by the edge itself on every host, renders that projection:
+ *    `slots` keyed by slot name, each entry `{app, label, host, path, origin, position}`, sorted
+ *    by position then label; `origin` is `https://<host>.<apex>` (the env label is optional for
+ *    the default environment), or the environment origin with `host: null` for a service that
+ *    has not flipped yet (`NavigationRoute`/`EdgeRoutes`/`DeploymentActiveSubscriber`). A
+ *    service that stops being deployed drops out with its next `DeploymentActive`-less state —
+ *    the projection replaces, never merges.
+ * 5. **This package reads it** through `QITS_NAVIGATION` (`navigation.ts`, `toNavTree`) and the
+ *    address through `QITS_SCOPE` (`scope.ts`: `/<project>/<category>/<repository>/...`), and
+ *    the scoped project's repositories through `QITS_REPOSITORIES` (`repositories.ts`, archetype
+ *    → category).
+ * 6. **`sidebar()` below turns the three into rows**: Project (+ "Project setup", + the
+ *    `project.detail` entries) → one heading per category with a row per repository, the
+ *    `<category>.details` entries under the repository in scope → PLATFORM (`platform`) →
+ *    SYSTEM (`system`). Hrefs come from `QitsAppLinks.href(app, path, scope)` =
+ *    `origin + scopePath(scope) + path`; `current` from `QitsAppLinks.isCurrent`.
+ *
+ * So, to change the sidebar:
+ * - **Add an application or move its entry**: edit that service's `navigation-entries` and
+ *   release it. No change here.
+ * - **Reorder within a group**: change the `:position` numbers (compared within one slot only).
+ * - **Show an app under repositories of another category**: add that category's slot entry.
+ * - **A new slot or group** (a new heading, a new nesting level): extend the vocabulary in the
+ *   deployer's parser AND the edge's `EdgeRoutes.SLOTS`, then `QITS_NAV_SLOTS` in
+ *   `navigation.ts` and the row builder in `sidebar()` here — and release deployer, edge and
+ *   this library in that order.
+ * - **A new repository category**: it is the wrapper directory, so `RepositoryArchetype` in
+ *   qits-projects, `QITS_CATEGORIES` in `scope.ts` (also used by every SPA's route guard) and
+ *   the heading label here.
+ * - **Rows the platform does not announce** (Project, Project setup, the headings) are the
+ *   only compiled-in rows and live in `sidebar()`.
+ * - **Which row a sub-menu hangs under** is the current row; an app's own sub-menu is
+ *   `<ng-template qitsNavSubmenu>` in its shell, never a navigation entry.
  */
 @Component({
   selector: 'qits-main-layout',
