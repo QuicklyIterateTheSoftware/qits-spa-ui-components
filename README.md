@@ -149,12 +149,16 @@ application's own addresses go:
 
 | `routing`      | the applications                            | what a pick does                           |
 | -------------- | ------------------------------------------- | ------------------------------------------ |
-| `'repository'` | ci, docs, artifacts, configuration, workspaces | goes to `/<slug>/` on this host          |
-| `'project'`    | events, deployments, observability, maintenance | goes to `/<slug>/` on this host         |
+| `'repository'` | ci, docs, artifacts, configuration, workspaces | goes to `/<slug>` on this host           |
+| `'project'`    | events, deployments, observability, maintenance | goes to `/<slug>` on this host          |
 | `'system'`     | mirror, orchestrator, system, githost       | **leaves** for the projects host           |
 
 A system app is about the platform rather than about a project, so `/<slug>/` is not an address it
-serves; leaving is the honest answer to a pick it cannot act on itself. There is deliberately no
+serves; leaving is the honest answer to a pick it cannot act on itself. The router's form carries
+**no trailing slash**: `DefaultUrlSerializer` reads `/qits/` as `qits` plus an empty segment, which
+matches no `:project` route and lands every pick on the application's `**`. A full-document href
+keeps its slash — there the browser asks for the path and `Location` normalises it away before
+anything is matched — so `scopePath` and `href` are unaffected. There is deliberately no
 setter that only remembers: `select` navigates, so the URL stays the single statement of what is on
 screen and the back button cannot disagree with the pill.
 
@@ -210,8 +214,8 @@ The sidebar, top to bottom, is what the three reads make possible:
 - **Project**, when a project is in scope — the project's own page on qits-projects, with "Project
   setup" and the `project.detail` entries under it;
 - **one group per category that has repositories** — SERVICES, DAEMONS, LIBS, FRONTENDS, CLI,
-  IMAGES — one row per repository, and under the repository **in scope** the `<category>.details`
-  entries. Only the repository in scope opens: a tree that opened every repository would be as long
+  IMAGES — one row per repository, ordered by name and blind to case, and under the repository
+  **in scope** the `<category>.details` entries. Only the repository in scope opens: a tree that opened every repository would be as long
   as the project is big and would say nothing about where the reader is;
 - **PLATFORM**, the `platform` entries, hidden while no project is in scope, because the group is
   about one;

@@ -221,10 +221,16 @@ export class UrlScope implements QitsScopeSource {
    * A `system` app is about the platform rather than about a project, so `/<slug>/` there is not an
    * address it serves. Leaving for the projects host is the honest answer: the pick is acted on,
    * and the reader lands on the project rather than on a 404 with the right URL.
+   *
+   * <p><b>No trailing slash on the router's form, deliberately.</b> `DefaultUrlSerializer` parses
+   * `/qits/` as two segments — `qits` and an empty one — so a route table with `:project` never
+   * matches and every pick lands on the app's `**`. A full-document href keeps its trailing slash:
+   * there the browser asks for the path and `Location` normalises it away before any route is
+   * matched, which is why `scopePath` and `QitsAppLinks.href` are unaffected.
    */
   select(projectSlug: string | undefined): void {
     if (this.routing !== 'system') {
-      void this.router.navigateByUrl(projectSlug ? `/${projectSlug}/` : '/');
+      void this.router.navigateByUrl(projectSlug ? `/${projectSlug}` : '/');
       return;
     }
     const links = this.injector.get(QitsAppLinks);
