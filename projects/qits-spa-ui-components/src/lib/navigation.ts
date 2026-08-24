@@ -49,18 +49,31 @@ export interface QitsNavLink {
  * One application in one slot: what it is called, which host serves it, and where that host is.
  *
  * `host` is `null` for an application the edge does not serve on a host of its own yet. Such an
- * entry carries the *environment* origin, so a link to it has to go through the application's old
- * path segment — see {@link QitsAppLinks.href}'s `legacyFallback`. It is also why `host` is a
- * field of its own rather than something to derive from `origin`: only the edge knows which of the
- * two an origin is.
+ * entry carries the *environment* origin and is reached at `path` under it — which is why both
+ * fields are served rather than derived: only the edge knows which of the two an origin is, and
+ * only it knows the segment the application answers on.
+ *
+ * `path` is the application's own route prefix (`/ci`), normalised to a leading slash and no
+ * trailing one. A hosted application has it too; it is simply not needed to address one.
  */
 export interface QitsNavEntry {
   readonly app: string;
   readonly label: string;
   readonly host: string | null;
   readonly origin: string;
+  readonly path: string;
   readonly position: number;
   readonly slot: QitsNavSlot;
+}
+
+/** One entry as the platform serves it: {@link QitsNavEntry} without the slot it is filed under. */
+export interface QitsNavEntryBody {
+  readonly app: string;
+  readonly label: string;
+  readonly host?: string | null;
+  readonly origin: string;
+  readonly path?: string;
+  readonly position?: number;
 }
 
 /**
@@ -72,7 +85,7 @@ export interface QitsNavigation {
   readonly environment?: string;
   /** The environment's own origin — where an application without a host of its own is served. */
   readonly origin?: string;
-  readonly slots?: Readonly<Partial<Record<QitsNavSlot, readonly Omit<QitsNavEntry, 'slot'>[]>>>;
+  readonly slots?: Readonly<Partial<Record<QitsNavSlot, readonly QitsNavEntryBody[]>>>;
   /** The flat shape, from an edge that does not know about slots. */
   readonly links?: readonly QitsNavLink[];
 }
@@ -127,6 +140,13 @@ export const QITS_NAVIGATION_URL = '/main-navigation';
 /** The stranded answer: nothing to show, and no legacy list to fall back on either. */
 const NOTHING: QitsNavTree = { entries: [], environmentOrigin: undefined, legacy: [] };
 
+/** `/ci`, from `ci`, `/ci` or `/ci/` — a prefix to join to, with nothing to guess at either end. */
+function toPathPrefix(path: string | undefined): string {
+  if (!path) return '';
+  const leading = path.startsWith('/') ? path : `/${path}`;
+  return leading.replace(/\/+$/, '');
+}
+
 /** Entries first by position, then by label — so two entries at one position still have an order. */
 function inOrder(a: QitsNavEntry, b: QitsNavEntry): number {
   return a.position - b.position || a.label.localeCompare(b.label);
@@ -151,6 +171,7 @@ export function toNavTree(body: QitsNavigation | null | undefined): QitsNavTree 
         label: entry.label,
         host: entry.host ?? null,
         origin: entry.origin,
+        path: toPathPrefix(entry.path),
         position: entry.position ?? 0,
         slot,
       });

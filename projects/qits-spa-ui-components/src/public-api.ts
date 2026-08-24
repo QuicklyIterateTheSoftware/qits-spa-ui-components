@@ -17,6 +17,7 @@ export {
 } from './lib/navigation';
 export type {
   QitsNavEntry,
+  QitsNavEntryBody,
   QitsNavigation,
   QitsNavigationSource,
   QitsNavLink,

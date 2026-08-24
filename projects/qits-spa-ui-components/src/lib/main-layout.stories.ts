@@ -53,6 +53,7 @@ const DEMO_NAVIGATION: QitsNavigation = {
         app: 'qits-projects',
         label: 'Overview',
         host: 'projects',
+        path: '/projects',
         origin: PROJECTS_ORIGIN,
         position: 1,
       },
@@ -60,6 +61,7 @@ const DEMO_NAVIGATION: QitsNavigation = {
         app: 'qits-platform-mirror',
         label: 'Mirror',
         host: 'mirror',
+        path: '/mirror',
         origin: 'https://mirror.dev.example.com',
         position: 2,
       },
@@ -67,6 +69,7 @@ const DEMO_NAVIGATION: QitsNavigation = {
         app: 'qits-platform-system',
         label: 'System',
         host: 'system',
+        path: '/system',
         origin: 'https://system.dev.example.com',
         position: 4,
       },
@@ -76,6 +79,7 @@ const DEMO_NAVIGATION: QitsNavigation = {
         app: 'qits-platform-events',
         label: 'Events',
         host: 'events',
+        path: '/events',
         origin: 'https://events.dev.example.com',
         position: 1,
       },
@@ -83,6 +87,7 @@ const DEMO_NAVIGATION: QitsNavigation = {
         app: 'qits-platform-deployments',
         label: 'Deployments',
         host: 'deployments',
+        path: '/platform-deployments',
         origin: 'https://deployments.dev.example.com',
         position: 4,
       },
@@ -92,6 +97,7 @@ const DEMO_NAVIGATION: QitsNavigation = {
         app: 'qits-workspaces',
         label: 'Workspaces',
         host: 'workspaces',
+        path: '/workspaces',
         origin: 'https://workspaces.dev.example.com',
         position: 1,
       },
@@ -101,21 +107,26 @@ const DEMO_NAVIGATION: QitsNavigation = {
         app: 'qits-docs',
         label: 'Docs',
         host: 'docs',
+        path: '/docs',
         origin: 'https://docs.dev.example.com',
         position: 1,
       },
-      { app: 'qits-ci', label: 'CI', host: 'ci', origin: CI_ORIGIN, position: 2 },
+      { app: 'qits-ci', label: 'CI', host: 'ci', path: '/ci', origin: CI_ORIGIN, position: 2 },
+      // Not flipped yet: no host of its own, so the environment origin and its own segment. Its
+      // row is drawn all the same, and leads to its front page rather than to this repository.
       {
         app: 'qits-artifacts',
         label: 'Artifacts',
-        host: 'registry',
-        origin: 'https://registry.dev.example.com',
+        host: null,
+        path: '/artifacts',
+        origin: 'https://dev.example.com',
         position: 3,
       },
       {
         app: 'qits-workspaces',
         label: 'Workspaces',
         host: 'workspaces',
+        path: '/workspaces',
         origin: 'https://workspaces.dev.example.com',
         position: 5,
       },
@@ -125,10 +136,11 @@ const DEMO_NAVIGATION: QitsNavigation = {
         app: 'qits-docs',
         label: 'Docs',
         host: 'docs',
+        path: '/docs',
         origin: 'https://docs.dev.example.com',
         position: 1,
       },
-      { app: 'qits-ci', label: 'CI', host: 'ci', origin: CI_ORIGIN, position: 2 },
+      { app: 'qits-ci', label: 'CI', host: 'ci', path: '/ci', origin: CI_ORIGIN, position: 2 },
     ],
   },
 };
@@ -222,6 +234,9 @@ export const Grouped: Story = {
  * A repository in scope, read from a browser sitting on the ci host. The repository's own row is
  * open and lists what the platform has to say about it, and the entry that *is* this host is the
  * current page — host and path together, because either alone would mark the wrong row.
+ *
+ * Artifacts is an application the platform has not flipped yet: it has no host of its own, so its
+ * row points at its old segment under the environment origin, unscoped, and is never the page.
  */
 export const RepositoryInScope: Story = {
   name: 'Repository in scope',

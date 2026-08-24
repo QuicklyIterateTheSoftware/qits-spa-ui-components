@@ -201,6 +201,7 @@ describe('QitsMainLayout', () => {
 
     const PROJECTS_ORIGIN = 'https://projects.dev.example.com';
     const CI_ORIGIN = 'https://ci.dev.example.com';
+    const ENVIRONMENT_ORIGIN = 'https://dev.example.com';
 
     const TREE: QitsNavigation = {
       environment: 'dev',
@@ -211,14 +212,17 @@ describe('QitsMainLayout', () => {
             app: 'qits-projects',
             label: 'Overview',
             host: 'projects',
+            path: '/projects',
             origin: PROJECTS_ORIGIN,
             position: 1,
           },
+          // Not flipped yet: no host of its own, so the environment origin and its own segment.
           {
             app: 'qits-platform-system',
             label: 'System',
-            host: 'system',
-            origin: 'https://system.dev.example.com',
+            host: null,
+            path: '/system',
+            origin: ENVIRONMENT_ORIGIN,
             position: 4,
           },
         ],
@@ -227,6 +231,7 @@ describe('QitsMainLayout', () => {
             app: 'qits-platform-events',
             label: 'Events',
             host: 'events',
+            path: '/events',
             origin: 'https://events.dev.example.com',
             position: 1,
           },
@@ -236,16 +241,26 @@ describe('QitsMainLayout', () => {
             app: 'qits-workspaces',
             label: 'Workspaces',
             host: 'workspaces',
+            path: '/workspaces',
             origin: 'https://workspaces.dev.example.com',
             position: 1,
           },
         ],
         'services.details': [
-          { app: 'qits-ci', label: 'CI', host: 'ci', origin: CI_ORIGIN, position: 2 },
+          { app: 'qits-ci', label: 'CI', host: 'ci', path: '/ci', origin: CI_ORIGIN, position: 2 },
+          {
+            app: 'qits-artifacts',
+            label: 'Artifacts',
+            host: null,
+            path: '/artifacts',
+            origin: ENVIRONMENT_ORIGIN,
+            position: 3,
+          },
           {
             app: 'qits-docs',
             label: 'Docs',
             host: 'docs',
+            path: '/docs',
             origin: 'https://docs.dev.example.com',
             position: 1,
           },
@@ -255,6 +270,7 @@ describe('QitsMainLayout', () => {
             app: 'qits-docs',
             label: 'Docs',
             host: 'docs',
+            path: '/docs',
             origin: 'https://docs.dev.example.com',
             position: 1,
           },
@@ -348,7 +364,8 @@ describe('QitsMainLayout', () => {
       expect(href('Workspaces')).toBe('https://workspaces.dev.example.com/qits/');
       expect(href('qits-ci')).toBe(`${PROJECTS_ORIGIN}/qits/services/qits-ci/`);
       expect(href('Events')).toBe('https://events.dev.example.com/qits/');
-      expect(href('System')).toBe('https://system.dev.example.com/');
+      // No host of its own: the environment origin, at the segment the platform says it answers on.
+      expect(href('System')).toBe(`${ENVIRONMENT_ORIGIN}/system/`);
     });
 
     it('is the Project itself on the projects host, with no category in scope', async () => {
@@ -366,6 +383,7 @@ describe('QitsMainLayout', () => {
         'qits-ci',
         'Docs',
         'CI',
+        'Artifacts',
         'qits-projects',
         'qits-eventstream',
         'Events',
@@ -379,6 +397,7 @@ describe('QitsMainLayout', () => {
         'Workspaces',
         'Docs',
         'CI',
+        'Artifacts',
       ]);
       expect(current(fixture)).toEqual(['qits-ci']);
     });
@@ -396,6 +415,33 @@ describe('QitsMainLayout', () => {
           .find((a) => a.textContent?.trim() === 'CI')
           ?.getAttribute('href'),
       ).toBe(`${CI_ORIGIN}/qits/services/qits-ci/`);
+    });
+
+    /** An application the platform has not flipped yet is drawn all the same, at its own segment. */
+    it('marks an unflipped application current on the environment origin, under its segment', async () => {
+      const fixture = await renderTree({ url: '/system/nodes', browserOrigin: ENVIRONMENT_ORIGIN });
+
+      expect(
+        links(fixture)
+          .find((a) => a.textContent?.trim() === 'System')
+          ?.getAttribute('href'),
+      ).toBe(`${ENVIRONMENT_ORIGIN}/system/`);
+      expect(current(fixture)).toEqual(['System']);
+    });
+
+    /**
+     * Under a repository the same application has nothing scoped to point at, so the row goes to
+     * its front page — and says nothing about the repository on screen, which it cannot show.
+     */
+    it('links an unflipped application unscoped under a repository, and never as the page', async () => {
+      const fixture = await renderTree({
+        url: '/qits/services/qits-ci/',
+        browserOrigin: ENVIRONMENT_ORIGIN,
+      });
+      const artifacts = links(fixture).find((a) => a.textContent?.trim() === 'Artifacts');
+
+      expect(artifacts?.getAttribute('href')).toBe(`${ENVIRONMENT_ORIGIN}/artifacts/`);
+      expect(artifacts?.getAttribute('aria-current')).toBeNull();
     });
 
     it('says the repositories are still coming, rather than drawing no groups', async () => {

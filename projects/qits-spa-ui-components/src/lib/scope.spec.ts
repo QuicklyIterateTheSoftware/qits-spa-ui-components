@@ -116,6 +116,7 @@ describe('UrlScope', () => {
           app: 'qits-projects',
           label: 'Overview',
           host: 'projects',
+          path: '/projects',
           origin: 'https://projects.dev.example.com',
           position: 1,
         },

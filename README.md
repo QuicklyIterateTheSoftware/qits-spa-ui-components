@@ -112,16 +112,19 @@ edge answers with slots — one entry per application, filed under where it belo
   "environment": "dev",
   "origin": "https://dev.example.com",
   "slots": {
-    "system": [{ "app": "qits-projects", "label": "Overview", "host": "projects", "origin": "https://projects.dev.example.com", "position": 1 }],
-    "platform": [{ "app": "qits-platform-events", "label": "Events", "host": "events", "origin": "https://events.dev.example.com", "position": 1 }],
-    "project.detail": [{ "app": "qits-workspaces", "label": "Workspaces", "host": "workspaces", "origin": "https://workspaces.dev.example.com", "position": 1 }],
-    "services.details": [{ "app": "qits-ci", "label": "CI", "host": "ci", "origin": "https://ci.dev.example.com", "position": 2 }]
+    "system": [{ "app": "qits-projects", "label": "Overview", "host": "projects", "path": "/projects", "origin": "https://projects.dev.example.com", "position": 1 }],
+    "platform": [{ "app": "qits-platform-events", "label": "Events", "host": "events", "path": "/events", "origin": "https://events.dev.example.com", "position": 1 }],
+    "project.detail": [{ "app": "qits-workspaces", "label": "Workspaces", "host": "workspaces", "path": "/workspaces", "origin": "https://workspaces.dev.example.com", "position": 1 }],
+    "services.details": [{ "app": "qits-ci", "label": "CI", "host": null, "path": "/ci", "origin": "https://dev.example.com", "position": 2 }]
   }
 }
 ```
 
-`HttpNavigationSource` normalises that into a `QitsNavTree`: every slot flattened into one list
-sorted by position then label, each entry carrying its slot, plus the environment origin. An edge
+Every entry carries both `host` and `path`, and the last one above is an application the platform
+does not serve on a host of its own yet: `host: null`, the environment origin, and `/ci` as the
+segment it answers on there. `HttpNavigationSource` normalises the payload into a `QitsNavTree`:
+every slot flattened into one list sorted by position then label, each entry carrying its slot and
+its path prefix, plus the environment origin. An edge
 that predates slots answers the flat `{"links":[…]}` shape instead, and the tree carries it as
 `legacy` — set **only** when no slots were served, because the two are exclusive: `legacy` means
 "this platform cannot tell me its shape", and the sidebar then draws the flat list it always drew.
@@ -166,20 +169,25 @@ const appLinks = inject(QitsAppLinks); // providedIn: 'root'
 
 appLinks.href('qits-ci', '', scope()); //            https://ci.dev.example.com/qits/services/qits-ci/
 appLinks.href('qits-ci', 'runs/7', { project }); //  https://ci.dev.example.com/qits/runs/7
+appLinks.href('qits-artifacts', 'images', scope()); // https://dev.example.com/artifacts/images
 appLinks.origin('qits-artifacts'); //                undefined — no host of its own yet
 appLinks.environmentOrigin(); //                     https://dev.example.com — clone URLs live here
 ```
 
 `href` is the origin from the navigation, the scope path, then the path. An application the platform
-does **not** serve on a host of its own has no address here, and says so with `undefined` rather
-than inventing one — pass `legacyFallback` (its old path segment, `'/artifacts/'`) to reach it under
-the environment origin instead. The scope is dropped for that form: an unflipped application has no
-scoped address, and spelling one would produce a URL that 404s.
+does **not** serve on a host of its own is reached at its own segment — the `path` every entry
+carries — under the environment origin, and the **scope is dropped** there: such an application has
+no scoped address, and spelling one would produce a URL that 404s. Only an application the platform
+names in no entry at all has no address here, and `href` says so with `undefined` rather than
+inventing one; `legacyFallback` is a caller's segment for exactly that case, and an entry's own path
+wins over it, being the platform's live statement rather than a guess frozen at release time.
 
 `entries(slot)` reads one slot, and `isCurrent(entry, scope)` says whether an entry is the page on
 screen — **host and path together**. The host alone would mark every entry of an application current
 wherever the reader is inside it; the path alone would mark the ci entry current on the docs host,
-because both spell the same repository path. `QITS_BROWSER_ORIGIN` is the seam a spec replaces to
+because both spell the same repository path. An application with no host of its own is asked the
+same question in its own terms: current where the reader is on the environment origin, under its
+segment. `QITS_BROWSER_ORIGIN` is the seam a spec replaces to
 say "we are on the ci host"; its factory reads the document, so a server render has an answer too.
 
 ## The layout
@@ -229,10 +237,10 @@ Four states, and no compiled-in list behind any of them:
 
 A fallback list compiled in here would put back the drift this replaced _and hide it_: the chrome
 would sometimes show what the platform serves and sometimes a guess frozen at release time, with
-nothing on screen telling them apart. That is also why an entry with **no host of its own** is left
-out of the tree: it is reachable at a path this library was never told, and a guessed segment is
-exactly the compiled-in topology the chrome exists to stop carrying. Such an application appears
-again the moment the platform serves it on a host.
+nothing on screen telling them apart. Nothing is guessed for an application without a host of its
+own either — the platform states its segment as the entry's `path`, so it is drawn in its slot at
+`<environment origin><path>/`. Under a repository such a row is drawn but never marked current: the
+link goes to that application's front page, which says nothing about the repository on screen.
 
 `[links]` is an explicit override in the flat shape. A **non-empty** list wins outright and the
 source is not consulted, which is what lets a story or a spec render the real chrome with no

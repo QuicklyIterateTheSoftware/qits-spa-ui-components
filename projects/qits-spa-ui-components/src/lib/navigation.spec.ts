@@ -29,6 +29,7 @@ describe('toNavTree', () => {
             app: 'qits-platform-system',
             label: 'System',
             host: 'system',
+            path: '/system',
             origin: 'https://system.dev.example.com',
             position: 4,
           },
@@ -36,6 +37,7 @@ describe('toNavTree', () => {
             app: 'qits-projects',
             label: 'Overview',
             host: 'projects',
+            path: '/projects',
             origin: 'https://projects.dev.example.com',
             position: 1,
           },
@@ -45,6 +47,7 @@ describe('toNavTree', () => {
             app: 'qits-ci',
             label: 'CI',
             host: 'ci',
+            path: '/ci',
             origin: 'https://ci.dev.example.com',
             position: 2,
           },
@@ -52,6 +55,7 @@ describe('toNavTree', () => {
             app: 'qits-docs',
             label: 'Docs',
             host: 'docs',
+            path: '/docs',
             origin: 'https://docs.dev.example.com',
             position: 2,
           },
@@ -71,7 +75,7 @@ describe('toNavTree', () => {
     expect(tree.legacy).toBeUndefined();
   });
 
-  it('carries a host-less application as such, with the environment origin', () => {
+  it('carries a host-less application as such: the environment origin, and its segment', () => {
     const tree = toNavTree({
       origin: 'https://dev.example.com',
       slots: {
@@ -80,6 +84,7 @@ describe('toNavTree', () => {
             app: 'qits-ci',
             label: 'CI',
             host: null,
+            path: '/ci',
             origin: 'https://dev.example.com',
             position: 2,
           },
@@ -88,6 +93,21 @@ describe('toNavTree', () => {
     });
     expect(tree.entries[0].host).toBeNull();
     expect(tree.entries[0].origin).toBe('https://dev.example.com');
+    expect(tree.entries[0].path).toBe('/ci');
+  });
+
+  /** One spelling to join to, whatever the platform sent — and nothing invented where it sent none. */
+  it('normalises the path prefix at both ends', () => {
+    const tree = toNavTree({
+      slots: {
+        system: [
+          { app: 'a', label: 'A', origin: 'https://a.example.com', position: 1, path: 'ci' },
+          { app: 'b', label: 'B', origin: 'https://b.example.com', position: 2, path: '/ci/' },
+          { app: 'c', label: 'C', origin: 'https://c.example.com', position: 3 },
+        ],
+      },
+    });
+    expect(tree.entries.map((entry) => entry.path)).toEqual(['/ci', '/ci', '']);
   });
 
   it('ignores a slot it does not know and an entry it could not draw', () => {
@@ -98,10 +118,11 @@ describe('toNavTree', () => {
             app: 'qits-ci',
             label: '',
             host: 'ci',
+            path: '/ci',
             origin: 'https://ci.dev.example.com',
             position: 1,
           },
-          { app: 'qits-docs', label: 'Docs', host: 'docs', origin: '', position: 1 },
+          { app: 'qits-docs', label: 'Docs', host: 'docs', path: '/docs', origin: '', position: 1 },
         ],
         // A slot this release does not know: dropped, not drawn somewhere arbitrary.
         nowhere: [
@@ -166,6 +187,7 @@ describe('provideQitsNavigation', () => {
               app: 'qits-projects',
               label: 'Overview',
               host: 'projects',
+              path: '/projects',
               origin: 'https://projects.dev.example.com',
               position: 1,
             },
@@ -236,6 +258,7 @@ describe('the literal sources', () => {
                 app: 'qits-platform-events',
                 label: 'Events',
                 host: 'events',
+                path: '/events',
                 origin: 'https://events.dev.example.com',
                 position: 1,
               },

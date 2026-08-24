@@ -655,8 +655,10 @@ export class QitsMainLayout {
       for (const repository of inGroup) {
         const open = scope.category === category && scope.repository === repository.name;
         const inScope: QitsScope = { project, category, repository: repository.name };
+        // `scoped: false` — an application with no host has no address for this repository, so its
+        // row leads to its front page and says nothing about where the reader is.
         const children = open
-          ? this.entryRows(`${category}.details`, inScope, `${category}.details`)
+          ? this.entryRows(`${category}.details`, inScope, `${category}.details`, true, false)
           : [];
         rows.push({
           kind: 'link',
@@ -682,15 +684,18 @@ export class QitsMainLayout {
   /**
    * The entries of one slot as rows.
    *
-   * An entry the platform serves on **no host of its own** is left out: it is reachable under the
-   * environment origin at a path this library was never told, and a guessed segment is exactly the
-   * compiled-in topology the chrome exists to stop carrying.
+   * An application the platform serves on **no host of its own** is drawn all the same, at its own
+   * segment under the environment origin — `QitsAppLinks.href` drops the scope for it, because such
+   * an application has no scoped address. `scoped` is how the caller says that dropping the scope
+   * would be a lie rather than a fallback: under a repository, an unscoped link goes to the
+   * application's front page, so it is drawn but never marked as the repository on screen.
    */
   private entryRows(
     slot: QitsNavSlot,
     scope: QitsScope,
     keyPrefix: string,
     child = true,
+    scoped = true,
   ): QitsNavRow[] {
     const rows: QitsNavRow[] = [];
     for (const entry of this.appLinks.entries(slot)) {
@@ -701,7 +706,7 @@ export class QitsMainLayout {
         key: `${keyPrefix}:${entry.app}`,
         label: entry.label,
         href,
-        current: this.appLinks.isCurrent(entry, scope),
+        current: (scoped || entry.host !== null) && this.appLinks.isCurrent(entry, scope),
         child,
       });
     }

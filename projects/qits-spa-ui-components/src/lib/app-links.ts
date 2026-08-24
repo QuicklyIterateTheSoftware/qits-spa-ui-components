@@ -55,7 +55,7 @@ export class QitsAppLinks {
     return this.source?.tree()?.entries.find((entry) => entry.app === app);
   }
 
-  /** Where an application is served, or `undefined` while it has no host of its own. */
+  /** Where an application is served on a host of its own, or `undefined` while it has none. */
   origin(app: string): string | undefined {
     const entry = this.entry(app);
     return entry?.host ? entry.origin : undefined;
@@ -74,18 +74,23 @@ export class QitsAppLinks {
   /**
    * A link into another application: its origin, the scope path, then `path`.
    *
-   * `legacyFallback` is the application's old path segment — `/ci/` — and it is used only where the
-   * application has **no host of its own** yet. Such an app is still served under the environment
-   * origin at that segment, and it has no scoped address, so the scope is deliberately dropped
-   * rather than spelled into a URL that would 404. With no fallback given, an application the
-   * platform does not serve on a host has no address here, and the caller gets `undefined`.
+   * An application with **no host of its own** is still served under the environment origin at its
+   * own segment, which the platform states as `entry.path`. It has no scoped address, so the scope
+   * is deliberately dropped there rather than spelled into a URL that would 404 —
+   * `https://dev.example.com/artifacts/images`, not `…/artifacts/qits/services/…`.
+   *
+   * `legacyFallback` is that same segment for an application the platform names in no entry at all.
+   * The entry's own path wins where there is one: it is the platform's live statement, and the
+   * argument is a caller's guess frozen at release time. With neither, there is no address this
+   * library can honestly spell and the caller gets `undefined`.
    */
   href(app: string, path: string, scope?: QitsScope, legacyFallback?: string): string | undefined {
     const own = this.origin(app);
     if (own) return join(own, join(scopePath(scope), path));
     const environment = this.environmentOrigin();
-    if (!environment || !legacyFallback) return undefined;
-    return join(environment, join(legacyFallback, path));
+    const segment = this.entry(app)?.path || legacyFallback;
+    if (!environment || !segment) return undefined;
+    return join(environment, join(`${segment}/`, path));
   }
 
   /** The path the reader is on: the router's URL where there is one, else the document's. */
@@ -95,19 +100,20 @@ export class QitsAppLinks {
   }
 
   /**
-   * Whether an entry is the page on screen: same host, and a path inside that scope.
+   * Whether an entry is the page on screen: the host that serves it, and a path inside its scope.
    *
    * Both halves are needed. The host alone would mark every entry of an application current
    * wherever the reader is inside it; the path alone would mark the ci entry current on the docs
    * host, because both spell the same repository path.
    *
-   * An entry without a host of its own is never current: it is served under the environment origin
-   * at a path this library was not told, so there is nothing honest to compare.
+   * An application with no host of its own is asked the same question in its own terms: it is
+   * current where the reader is on the environment origin, under its segment. The scope plays no
+   * part there, because such an application has no scoped address to be inside.
    */
   isCurrent(entry: QitsNavEntry, scope?: QitsScope): boolean {
-    if (!entry.host) return false;
     const host = hostOf(entry.origin);
     if (!host || host !== hostOf(this.browserOrigin)) return false;
+    if (!entry.host) return entry.path !== '' && this.currentPath().startsWith(`${entry.path}/`);
     return this.currentPath().startsWith(scopePath(scope));
   }
 }

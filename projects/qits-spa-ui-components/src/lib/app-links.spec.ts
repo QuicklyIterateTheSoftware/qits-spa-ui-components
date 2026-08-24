@@ -19,6 +19,7 @@ describe('QitsAppLinks', () => {
           app: 'qits-projects',
           label: 'Overview',
           host: 'projects',
+          path: '/projects',
           origin: 'https://projects.dev.example.com',
           position: 1,
         },
@@ -28,6 +29,7 @@ describe('QitsAppLinks', () => {
           app: 'qits-ci',
           label: 'CI',
           host: 'ci',
+          path: '/ci',
           origin: 'https://ci.dev.example.com',
           position: 2,
         },
@@ -35,6 +37,7 @@ describe('QitsAppLinks', () => {
           app: 'qits-docs',
           label: 'Docs',
           host: 'docs',
+          path: '/docs',
           origin: 'https://docs.dev.example.com',
           position: 1,
         },
@@ -43,6 +46,7 @@ describe('QitsAppLinks', () => {
           app: 'qits-artifacts',
           label: 'Artifacts',
           host: null,
+          path: '/artifacts',
           origin: 'https://dev.example.com',
           position: 3,
         },
@@ -107,13 +111,25 @@ describe('QitsAppLinks', () => {
    * under the environment origin — and has no scoped address, so the scope is dropped rather than
    * spelled into a URL that would 404.
    */
-  it('falls back to the old path segment for an application with no host', () => {
+  it('reaches an application with no host at its own segment, unscoped', () => {
     const appLinks = links();
-    expect(appLinks.href('qits-artifacts', 'images', { project: 'qits' }, '/artifacts/')).toBe(
+    // The scope is dropped rather than spelled: an unflipped application has no scoped address.
+    expect(appLinks.href('qits-artifacts', 'images', { project: 'qits' })).toBe(
       'https://dev.example.com/artifacts/images',
     );
-    // No fallback offered: there is no address this library can honestly spell.
-    expect(appLinks.href('qits-artifacts', '', { project: 'qits' })).toBeUndefined();
+    expect(appLinks.href('qits-artifacts', '')).toBe('https://dev.example.com/artifacts/');
+  });
+
+  it('prefers the platform’s own segment to a caller’s, and needs one of the two', () => {
+    const appLinks = links();
+    // A caller's fallback is frozen at release time; the entry is what the platform says today.
+    expect(appLinks.href('qits-artifacts', '', {}, '/old-artifacts/')).toBe(
+      'https://dev.example.com/artifacts/',
+    );
+    // An application the platform names nowhere: the caller's segment is all there is.
+    expect(appLinks.href('qits-nothing', 'x', {}, '/nothing/')).toBe(
+      'https://dev.example.com/nothing/x',
+    );
     expect(appLinks.href('qits-nothing', '')).toBeUndefined();
   });
 
@@ -158,8 +174,30 @@ describe('QitsAppLinks', () => {
     ).toBe(true);
   });
 
-  it('never marks an application without a host current: it has no address to compare', async () => {
+  /** An application with no host is asked the same question in its own terms: origin, then segment. */
+  it('marks an application without a host current under its segment on the environment origin', async () => {
     const appLinks = links('https://dev.example.com');
+    await TestBed.inject(Router).navigateByUrl('/artifacts/images');
+
+    expect(appLinks.isCurrent(entry(appLinks, 'qits-artifacts'), {})).toBe(true);
+    // The scope plays no part: such an application has no scoped address to be inside.
+    expect(
+      appLinks.isCurrent(entry(appLinks, 'qits-artifacts'), {
+        project: 'qits',
+        category: 'services',
+        repository: 'qits-ci',
+      }),
+    ).toBe(true);
+  });
+
+  it('is not current elsewhere on the environment origin', async () => {
+    const appLinks = links('https://dev.example.com');
+    await TestBed.inject(Router).navigateByUrl('/ci/runs/7');
+    expect(appLinks.isCurrent(entry(appLinks, 'qits-artifacts'), {})).toBe(false);
+  });
+
+  it('is not current on another host, whatever the path is', async () => {
+    const appLinks = links('https://ci.dev.example.com');
     await TestBed.inject(Router).navigateByUrl('/artifacts/images');
     expect(appLinks.isCurrent(entry(appLinks, 'qits-artifacts'), {})).toBe(false);
   });
