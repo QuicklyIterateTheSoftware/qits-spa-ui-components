@@ -64,6 +64,7 @@ describe('QitsAppLinks', () => {
     },
     applications: {
       'qits-ci': { apiDocs: '/ci/q/swagger-ui' },
+      'qits-artifacts': { apiDocs: '/artifacts/q/swagger-ui' },
     },
   };
 
@@ -216,13 +217,19 @@ describe('QitsAppLinks', () => {
     expect(appLinks.isCurrent(entry(appLinks, 'qits-artifacts'), {})).toBe(false);
   });
 
-  it('spells an api-docs url from the environment origin, and nothing where none was published', () => {
+  it('spells an api-docs url on the application host, and nothing where none was published', () => {
     const appLinks = links();
-    // The environment origin on purpose: it serves every application's routes, and /<seg>/q/…
-    // never moves off it — so the URL works before, during and after a host flip.
-    expect(appLinks.apiDocsUrl('qits-ci')).toBe('https://dev.example.com/ci/q/swagger-ui');
+    // The path is one of the application's own routes, so its own host serves it.
+    expect(appLinks.apiDocsUrl('qits-ci')).toBe('https://ci.dev.example.com/ci/q/swagger-ui');
     expect(appLinks.apiDocsUrl('qits-docs')).toBeUndefined();
     expect(appLinks.apiDocsUrl('qits-nothing')).toBeUndefined();
+  });
+
+  it('falls back to the environment origin for an application with no host', () => {
+    // No host of its own: an older platform serves it under the door, at its own segment.
+    expect(links().apiDocsUrl('qits-artifacts')).toBe(
+      'https://dev.example.com/artifacts/q/swagger-ui',
+    );
   });
 
   it('marks a subpathed entry current only inside its view', async () => {

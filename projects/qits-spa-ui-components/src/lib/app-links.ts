@@ -72,19 +72,19 @@ export class QitsAppLinks {
   }
 
   /**
-   * Where an application's browsable API document lives, as a full URL — the environment origin
-   * plus the path the application declared. `undefined` is a real answer with two causes a caller
-   * treats alike: the application publishes no document, or the platform has not answered yet.
+   * Where an application's browsable API document lives, as a full URL — the application's own
+   * origin plus the path it declared. `undefined` is a real answer with two causes a caller treats
+   * alike: the application publishes no document, or the platform has not answered yet.
    *
-   * The environment origin on purpose, never the application's own host: it serves every
-   * application's routes and `/<seg>/q/…` never moves off it, so the URL works before, during and
-   * after a host flip.
+   * The application's own host on purpose: the path is one of its own routes, and its own host is
+   * what serves those. An application with no host of its own falls back to the environment
+   * origin, which is where an older platform still serves it.
    */
   apiDocsUrl(app: string): string | undefined {
     const path = this.source?.tree()?.apiDocs[app];
-    const environment = this.environmentOrigin();
-    if (!path || !environment) return undefined;
-    return join(environment, path);
+    const origin = this.origin(app) ?? this.environmentOrigin();
+    if (!path || !origin) return undefined;
+    return join(origin, path);
   }
 
   /**
