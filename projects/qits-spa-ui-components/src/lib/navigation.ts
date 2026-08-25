@@ -59,8 +59,8 @@ export interface QitsNavLink {
  * `subpath` is the view this entry opens, appended after the scope the sidebar composes
  * (`/<project>/<category>/<repository>/api-docs`). Normalised to no slash at either end, and `''`
  * for the entry every application declared before the field existed: the application's root under
- * that same scope. It is deliberately NOT `path` — that field is the app's route prefix on the
- * environment origin, and this one is a route segment inside the app.
+ * that same scope. It is deliberately NOT `path` — that field is the app's own route prefix, and
+ * this one is a route segment inside the app.
  */
 export interface QitsNavEntry {
   readonly app: string;
@@ -86,8 +86,8 @@ export interface QitsNavEntryBody {
 
 /**
  * Per-application metadata the platform serves beside the slots — facts about an application
- * rather than placements of it. `apiDocs` is where its browsable API document lives, as a path
- * under the environment origin (`/ci/q/swagger-ui`).
+ * rather than placements of it. `apiDocs` is where its browsable API document lives, as one of the
+ * application's own routes (`/ci/q/swagger-ui`) — served by the application's own host.
  */
 export interface QitsNavApplication {
   readonly apiDocs?: string | null;
