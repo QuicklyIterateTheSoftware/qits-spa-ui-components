@@ -169,6 +169,33 @@ describe('QitsAppLinks', () => {
     ).toBe(false);
   });
 
+  /**
+   * The scope ROOT is the page the application's own sidebar row opens, and the router serializes
+   * it without a trailing slash — `/qits/services/qits-ci`, one character short of the scope path.
+   * Current all the same: this was the defect that left the docs sub-menu detached at the bottom
+   * of the sidebar exactly on the page its own row navigates to.
+   */
+  it('is current on its own scope root, with and without the trailing slash', async () => {
+    const appLinks = links('https://ci.dev.example.com');
+    await TestBed.inject(Router).navigateByUrl('/qits/services/qits-ci');
+
+    expect(
+      appLinks.isCurrent(entry(appLinks, 'qits-ci'), {
+        project: 'qits',
+        category: 'services',
+        repository: 'qits-ci',
+      }),
+    ).toBe(true);
+    // A sibling repository whose name extends this one is still another place.
+    expect(
+      appLinks.isCurrent(entry(appLinks, 'qits-ci'), {
+        project: 'qits',
+        category: 'services',
+        repository: 'qits',
+      }),
+    ).toBe(false);
+  });
+
   it('is not current on somebody else’s host, whatever the path says', async () => {
     const appLinks = links('https://docs.dev.example.com');
     await TestBed.inject(Router).navigateByUrl('/qits/services/qits-ci/');
