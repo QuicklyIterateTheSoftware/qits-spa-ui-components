@@ -132,7 +132,12 @@ export class QitsAppLinks {
   isCurrent(entry: QitsNavEntry, scope?: QitsScope): boolean {
     const host = hostOf(entry.origin);
     if (!host || host !== hostOf(this.browserOrigin)) return false;
-    if (!entry.host) return entry.path !== '' && this.currentPath().startsWith(`${entry.path}/`);
-    return this.currentPath().startsWith(join(scopePath(scope), entry.subpath));
+    // Both sides are compared slash-terminated. The router serializes the scope ROOT without its
+    // trailing slash — `/qits/services/qits-ci`, one character short of the scope path — and that
+    // page is exactly the one this entry's own row opens; bare `startsWith` also let a sibling
+    // whose name extends the asked-for path (`…/api-docs-2` under `…/api-docs`) read as inside it.
+    const current = `${this.currentPath().replace(/\/+$/, '')}/`;
+    if (!entry.host) return entry.path !== '' && current.startsWith(`${entry.path}/`);
+    return current.startsWith(`${join(scopePath(scope), entry.subpath).replace(/\/+$/, '')}/`);
   }
 }
