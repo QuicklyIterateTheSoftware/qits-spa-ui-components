@@ -55,26 +55,38 @@ move the caret, `Enter` picks.
 
 Every service on this platform is its own host, and every SPA under it shares one grammar:
 
-    https://<app>.<env>.<domain>/<projectSlug>/<category>/<repoName>/…   a repository
+    https://<app>.<env>.<domain>/<projectSlug>/<component>/<repoName>/…  a repository
+    https://<app>.<env>.<domain>/<projectSlug>/<category>/<repoName>/…   the same, before components
     https://<app>.<env>.<domain>/<projectSlug>/…                         a project
     https://<app>.<env>.<domain>/…                                       the platform
 
-The six categories are `services daemons libs frontends cli images`. `parseScope` reads that
-grammar and nothing else:
+The middle segment is the repository's **component** — the technical unit `qits-ci`, which its
+service, its frontend and its daemon all belong to. A repository the platform has not given one
+keeps spelling its archetype category there; the six are `services daemons libs frontends cli
+images`. Both forms resolve, and `QitsScope` carries the segment as `group` either way, with
+`category` set as well where it spells one of the six.
 
 ```ts
-parseScope('/qits/services/qits-ci/runs/1'); // { project: 'qits', category: 'services', repository: 'qits-ci' }
-parseScope('/traces'); //                       {} — an application's own page
-parseScope('/qits/epics/1', knownSlugs); //     { project: 'qits' } — because the platform has that slug
+parseScope('/qits/services/qits-ci/runs/1'); //     { project, group: 'services', category: 'services', repository: 'qits-ci' }
+parseScope('/traces'); //                           {} — an application's own page
+parseScope('/qits/epics/1', knownSlugs); //         { project: 'qits' } — the platform has that slug
+parseScope('/qits/qits-ci/qits-ci-service', knownSlugs, knownComponents);
+//                                                  { project: 'qits', group: 'qits-ci', repository: 'qits-ci-service' }
 ```
 
-**Segment one is a project only when the URL proves it**: either segment two is a category, or the
-project list the chrome already loaded contains the slug. That rule is what lets every SPA keep its
-own top-level routes. A project is never a category either, so `/services` stays this app's own
-page — and qits-projects refuses a slug that spells a category or a routed segment, so the two
-vocabularies cannot collide from the other side.
+**Nothing is a project or a group until the URL proves it.** The six categories are compiled in, so
+the archetype form reads before any list has answered. Everything else takes a list: `knownSlugs` —
+the project list the chrome loaded — proves segment one, and `knownComponents` — the components of
+that project's repositories — proves segment two, because component names are an **open** set only
+the platform knows. So a component address _settles_, exactly as the project form always has: until
+the repository list answers, `/qits/qits-ci/qits-ci-service` is the project alone, and the project
+it names never changes. That rule is what lets every SPA keep its own top-level routes, and what
+keeps `/qits/epics/1` an application's page inside a project rather than a repository `1` in a
+component `epics`. A project is never a category either, so `/services` stays this app's own page —
+and qits-projects refuses a slug that spells a category or a routed segment, so the two vocabularies
+cannot collide from the other side.
 
-`scopePath(scope)` gives the directory form (`/`, `/qits/`, `/qits/services/qits-ci/`) and
+`scopePath(scope)` gives the directory form (`/`, `/qits/`, `/qits/qits-ci/qits-ci-service/`) and
 `scopeCommands(scope)` the same prefix as router commands, for an in-app absolute link:
 
 ```ts
@@ -82,7 +94,9 @@ router.navigate([...scopeCommands(scope()), 'runs', id]);
 ```
 
 Both are pure functions of a `QitsScope`, so a route guard, a spec and the chrome answer the same
-question the same way.
+question the same way. Both read `group` first and `category` after it — `scopeGroup(scope)` is
+that rule in one place — so a link built from `{ project, category, repository }` before components
+existed still spells the address it always did.
 
 ## The three reads
 
@@ -136,10 +150,12 @@ so there is no request to flush and no pending task to wait on.
 **`provideQitsProjects()`** issues one `GET /projects/api/projects` and installs
 `QITS_REPOSITORIES` beside it: the repositories of whatever project is in scope, one `GET
 /projects/api/projects/{id}/repositories` per project and none at all while none is open. Leaving a
-project cancels a read still in flight. The archetype table — `SERVICE`→`services`,
-`DAEMON`→`daemons`, `LIBRARY`→`libs`, `FRONTEND`→`frontends`, `CLI`→`cli`, `IMAGE`→`images` — is
-**copied** here rather than imported: this library depends on no qits module, and a repository whose
-archetype it does not know is left out of the groups rather than filed under a guess.
+project cancels a read still in flight. Each row carries its `component` where qits-projects records
+one — that is what the sidebar groups by and what the address spells — and its archetype, mapped
+through a table copied here rather than imported: `SERVICE`→`services`, `DAEMON`→`daemons`,
+`LIBRARY`→`libs`, `FRONTEND`→`frontends`, `CLI`→`cli`, `IMAGE`→`images`. This library depends on no
+qits module, so an archetype it does not know maps to nothing, and a repository with **neither** a
+component nor a known archetype is left out of the groups rather than filed under a guess.
 `provideQitsProjectList([…])` and `provideQitsRepositoryList([…], wrapperId)` are the literal forms.
 
 **`provideQitsScope(routing)`** installs `UrlScope`, which reads the address and nothing else — no
@@ -213,10 +229,14 @@ The sidebar, top to bottom, is what the three reads make possible:
 - **the project picker** in the top-left slot, its value the project slug;
 - **Project**, when a project is in scope — the project's own page on qits-projects, with "Project
   setup" and the `project.detail` entries under it;
-- **one group per category that has repositories** — SERVICES, DAEMONS, LIBS, FRONTENDS, CLI,
-  IMAGES — one row per repository, ordered by name and blind to case, and under the repository
-  **in scope** the `<category>.details` entries. Only the repository in scope opens: a tree that opened every repository would be as long
-  as the project is big and would say nothing about where the reader is;
+- **one group per component that has repositories** — `qits-ci`, `qits-projects` — in name order,
+  and after them the archetype categories that still hold something — SERVICES, DAEMONS, LIBS,
+  FRONTENDS, CLI, IMAGES, in that order. One row per repository, ordered by name and blind to case,
+  and under the repository **in scope** the `<category>.details` entries of that repository's own
+  archetype: the slots say which _kinds_ of repository an application has something to say about,
+  which is a different question from which component it is part of. Only the repository in scope
+  opens: a tree that opened every repository would be as long as the project is big and would say
+  nothing about where the reader is;
 - **PLATFORM**, the `platform` entries, hidden while no project is in scope, because the group is
   about one;
 - **SYSTEM**, the `system` entries, which are about the platform itself.

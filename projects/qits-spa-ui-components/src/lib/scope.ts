@@ -34,28 +34,64 @@ function isCategory(segment: string | undefined): segment is QitsCategory {
 }
 
 /**
- * What the address says is on screen: a project, a category inside it, a repository inside that.
+ * What the address says is on screen: a project, a group inside it, a repository inside that.
  * Empty is the system scope — a page about the platform rather than about one project.
  */
 export interface QitsScope {
   /** The project **slug**, which is what URLs name. Ids never appear in a path. */
   readonly project?: string;
+  /**
+   * The middle segment: the repository's **component** — `qits-ci` — where the platform gives it
+   * one, and its archetype category where it does not. One field because the URL has one segment;
+   * which of the two spelled it is a fact about the platform, not about the address.
+   */
+  readonly group?: string;
+  /**
+   * The legacy archetype form of {@link group}, set only where the segment spells one of the six.
+   * Kept so a caller written before components — a route guard, a link built from a literal — reads
+   * and writes the same field it always did.
+   */
   readonly category?: QitsCategory;
   /** The repository name, which is unique inside a project. */
   readonly repository?: string;
 }
 
 /**
+ * The middle segment of a scope, whichever field named it. Every address spells `group` where
+ * `parseScope` produced it and `category` where a caller wrote a literal, so this is the one place
+ * that knows the two are one segment.
+ */
+export function scopeGroup(scope: QitsScope | undefined): string | undefined {
+  return scope?.group ?? scope?.category;
+}
+
+/**
  * The URL grammar every SPA on this platform shares:
  *
- *     /<projectSlug>/<category>/<repoName>/…   a repository
+ *     /<projectSlug>/<component>/<repoName>/…  a repository, as the platform groups it now
+ *     /<projectSlug>/<category>/<repoName>/…   a repository, in the archetype form
  *     /<projectSlug>/…                         a project
  *     /…                                       the platform
  *
- * <p><b>The first segment is a project only when the URL proves it.</b> Either the second segment
- * is a category — `/qits/services/qits-ci/runs/1` — or `knownSlugs` (the project list the chrome
- * already loaded) contains it. Everything else is the system scope, so an application's own route
- * like `/traces` keeps working and never reads as a project nobody has.
+ * <p><b>Nothing is a project or a group until the URL proves it.</b> Two closed facts and two
+ * lists prove it:
+ *
+ * <ul>
+ *   <li>the six categories are compiled in, so `/qits/services/qits-ci/runs/1` reads on its own,
+ *       before any list has answered;
+ *   <li>`knownSlugs` — the project list the chrome already loaded — proves the first segment;
+ *   <li>`knownComponents` — the components of the scoped project's repositories — proves the
+ *       second. Component names are an <b>open</b> set that only the platform knows, which is why
+ *       there is a list here where the categories needed none.
+ * </ul>
+ *
+ * Everything else is the system scope, so an application's own route like `/traces` keeps working
+ * and never reads as a project nobody has, and `/qits/epics/1` stays that app's own page inside a
+ * project rather than a repository `1` in a component `epics`.
+ *
+ * <p>A component form therefore <b>settles</b>, exactly as the project form always has: until the
+ * repository list answers, `/qits/qits-ci/qits-ci-service` is the project alone. The project it
+ * names is the same either way, so nothing re-reads and no address changes underneath the reader.
  *
  * <p>A project is never a category: `/services` is this app's own `services` page, not the
  * services of a project called nothing. qits-projects refuses a slug that spells a category or a
@@ -64,7 +100,11 @@ export interface QitsScope {
  * <p>Pure by design — no router, no injector — so a route guard, a spec and the chrome all answer
  * the same question the same way.
  */
-export function parseScope(path: string, knownSlugs?: ReadonlySet<string>): QitsScope {
+export function parseScope(
+  path: string,
+  knownSlugs?: ReadonlySet<string>,
+  knownComponents?: ReadonlySet<string>,
+): QitsScope {
   const segments = path
     .split(/[?#]/, 1)[0]
     .split('/')
@@ -74,10 +114,18 @@ export function parseScope(path: string, knownSlugs?: ReadonlySet<string>): Qits
   if (!first || isCategory(first)) return {};
   if (isCategory(second)) {
     return third
-      ? { project: first, category: second, repository: third }
-      : { project: first, category: second };
+      ? { project: first, group: second, category: second, repository: third }
+      : { project: first, group: second, category: second };
   }
-  return knownSlugs?.has(first) ? { project: first } : {};
+  // The component form is only ever read inside a project the platform names: the components come
+  // from that project's own repositories, so without the slug there is nothing to have proved them.
+  if (!knownSlugs?.has(first)) return {};
+  if (second && knownComponents?.has(second)) {
+    return third
+      ? { project: first, group: second, repository: third }
+      : { project: first, group: second };
+  }
+  return { project: first };
 }
 
 /** A segment that never decoded is better than one that threw: a malformed escape is not a crash. */
@@ -90,16 +138,17 @@ function decodeSegment(segment: string): string {
 }
 
 /**
- * Where a scope lives, as a directory path: `/`, `/qits/`, `/qits/services/qits-ci/`.
+ * Where a scope lives, as a directory path: `/`, `/qits/`, `/qits/qits-ci/qits-ci-service/`.
  *
  * The trailing slash is what makes it a prefix worth testing against — `/qits/` cannot match
- * `/qits-platform/`. A category without a repository does not get its own segment here: nothing is
+ * `/qits-platform/`. A group without a repository does not get its own segment here: nothing is
  * served at `/qits/services/`, so the honest base for such a page is the project it is in.
  */
 export function scopePath(scope: QitsScope | undefined): string {
   if (!scope?.project) return '/';
-  if (scope.category && scope.repository) {
-    return `/${scope.project}/${scope.category}/${scope.repository}/`;
+  const group = scopeGroup(scope);
+  if (group && scope.repository) {
+    return `/${scope.project}/${group}/${scope.repository}/`;
   }
   return `/${scope.project}/`;
 }
@@ -107,8 +156,9 @@ export function scopePath(scope: QitsScope | undefined): string {
 /** The same prefix as router commands, for an in-app absolute link: `[...scopeCommands(s), 'runs']`. */
 export function scopeCommands(scope: QitsScope | undefined): readonly string[] {
   if (!scope?.project) return ['/'];
-  if (scope.category && scope.repository) {
-    return ['/', scope.project, scope.category, scope.repository];
+  const group = scopeGroup(scope);
+  if (group && scope.repository) {
+    return ['/', scope.project, group, scope.repository];
   }
   return ['/', scope.project];
 }
@@ -117,7 +167,7 @@ export function scopeCommands(scope: QitsScope | undefined): readonly string[] {
  * How deep an application's own addresses go.
  *
  * - `repository` — its pages belong to one repository (ci, docs, artifacts, configuration,
- *   workspaces), so it routes `/<slug>/<category>/<repo>/…`;
+ *   workspaces), so it routes `/<slug>/<group>/<repo>/…`;
  * - `project` — its pages belong to a project (events, deployments, observability, maintenance);
  * - `system` — its pages are about the platform (mirror, orchestrator, system, githost). Such an
  *   app has no project route at all, which is why picking a project there *leaves* for
@@ -190,10 +240,36 @@ export class UrlScope implements QitsScopeSource {
     return new Set((projects?.projects() ?? []).map((project) => project.slug).filter(Boolean));
   });
 
-  readonly scope = computed(() => parseScope(this.url(), this.knownSlugs()));
+  /**
+   * The components the scoped project's repositories carry. An open set that only the platform
+   * knows, which is why it is read rather than compiled in — and why a component address settles
+   * once the repository list answers, the way a project address settles on the project list.
+   */
+  private readonly knownComponents = computed(() => {
+    const repositories = this.injector.get(QITS_REPOSITORIES, null, { optional: true });
+    return new Set(
+      (repositories?.repositories() ?? [])
+        .map((repository) => repository.component)
+        .filter((component): component is string => !!component),
+    );
+  });
+
+  /**
+   * The project alone, decided without the repository list.
+   *
+   * <p>Kept separate on purpose: the repository read is keyed on this, and the components come out
+   * of what that read answers. Reading the deep scope here would make the answer re-trigger the
+   * question. The two always agree on the project — the component form is only read for a slug
+   * `knownSlugs` already proved.
+   */
+  private readonly projectScope = computed(() => parseScope(this.url(), this.knownSlugs()));
+
+  readonly scope = computed(() =>
+    parseScope(this.url(), this.knownSlugs(), this.knownComponents()),
+  );
 
   readonly projectId = computed(() => {
-    const slug = this.scope().project;
+    const slug = this.projectScope().project;
     if (!slug) return undefined;
     const projects = this.injector.get(QITS_PROJECTS, null, { optional: true });
     return projects?.projects()?.find((project) => project.slug === slug)?.id;

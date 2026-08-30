@@ -15,8 +15,8 @@ import { QitsNavSubmenuSlot } from './nav-submenu';
 import { QITS_NAVIGATION, type QitsNavLink, type QitsNavSlot } from './navigation';
 import { QitsPicker, type QitsPickerOption } from './picker';
 import { QITS_PROJECTS } from './projects';
-import { QITS_REPOSITORIES } from './repositories';
-import { QITS_CATEGORIES, QITS_SCOPE, scopePath, type QitsScope } from './scope';
+import { QITS_REPOSITORIES, type QitsRepository } from './repositories';
+import { QITS_CATEGORIES, QITS_SCOPE, scopeGroup, scopePath, type QitsScope } from './scope';
 
 /** `/ci` and `/ci/` name the same application; comparing normalised paths keeps the match honest. */
 function toDirectoryPath(href: string): string {
@@ -66,8 +66,9 @@ interface QitsNavRow {
  * window never has to be observed and the component renders the same on a server as in a browser.
  *
  * **The sidebar is a tree of what is in scope, not a list of applications.** Every service is its
- * own host and every SPA shares one URL grammar — `/<project>/<category>/<repository>/…` — so the
- * chrome can name the project, its repositories by group, and under the repository on screen the
+ * own host and every SPA shares one URL grammar — `/<project>/<component>/<repository>/…`, and the
+ * archetype category in that middle segment for a repository the platform gives no component — so
+ * the chrome can name the project, its repositories by group, and under the repository on screen the
  * applications that have something to say about it. Which applications those are is the platform's
  * knowledge, asked for through `QITS_NAVIGATION`; which repositories exist is qits-projects', asked
  * for through `QITS_REPOSITORIES`; what is in scope is the address's, read through `QITS_SCOPE`.
@@ -127,14 +128,15 @@ interface QitsNavRow {
  *    service that stops being deployed drops out with its next `DeploymentActive`-less state —
  *    the projection replaces, never merges.
  * 5. **This package reads it** through `QITS_NAVIGATION` (`navigation.ts`, `toNavTree`) and the
- *    address through `QITS_SCOPE` (`scope.ts`: `/<project>/<category>/<repository>/...`), and
- *    the scoped project's repositories through `QITS_REPOSITORIES` (`repositories.ts`, archetype
- *    → category).
+ *    address through `QITS_SCOPE` (`scope.ts`: `/<project>/<group>/<repository>/...`), and
+ *    the scoped project's repositories through `QITS_REPOSITORIES` (`repositories.ts`, which
+ *    carries each row's component and maps its archetype to a category).
  * 6. **`sidebar()` below turns the three into rows**: Project (+ "Project setup", + the
- *    `project.detail` entries) → one heading per category with a row per repository, the
- *    `<category>.details` entries under the repository in scope → PLATFORM (`platform`) →
- *    SYSTEM (`system`). Hrefs come from `QitsAppLinks.href(app, path, scope)` =
- *    `origin + scopePath(scope) + path`; `current` from `QitsAppLinks.isCurrent`.
+ *    `project.detail` entries) → one heading per component with a row per repository, the
+ *    `<category>.details` entries of the repository's own archetype under the repository in
+ *    scope → PLATFORM (`platform`) → SYSTEM (`system`). Hrefs come from
+ *    `QitsAppLinks.href(app, path, scope)` = `origin + scopePath(scope) + path`; `current` from
+ *    `QitsAppLinks.isCurrent`.
  *
  * So, to change the sidebar:
  * - **Add an application or move its entry**: edit that service's `navigation-entries` and
@@ -145,9 +147,10 @@ interface QitsNavRow {
  *   deployer's parser AND the edge's `EdgeRoutes.SLOTS`, then `QITS_NAV_SLOTS` in
  *   `navigation.ts` and the row builder in `sidebar()` here — and release deployer, edge and
  *   this library in that order.
- * - **A new repository category**: it is the wrapper directory, so `RepositoryArchetype` in
- *   qits-projects, `QITS_CATEGORIES` in `scope.ts` (also used by every SPA's route guard) and
- *   the heading label here.
+ * - **A new sidebar group**: it is a component, so it appears the moment qits-projects records one
+ *   on a repository row — nothing to release here. The six archetype categories are the legacy
+ *   grouping and a closed set: changing them means `RepositoryArchetype` in qits-projects and
+ *   `QITS_CATEGORIES` in `scope.ts` (also used by every SPA's route guard).
  * - **Rows the platform does not announce** (Project, Project setup, the headings) are the
  *   only compiled-in rows and live in `sidebar()`.
  * - **Which row a sub-menu hangs under** is the current row; an app's own sub-menu is
@@ -687,15 +690,19 @@ export class QitsMainLayout {
         href: link(origin, { project }, ''),
         // The project itself, unless something inside it is the page — the deepest row wins.
         current:
-          this.onProjectsHost() && !scope.category && !children.some((child) => child.current),
+          this.onProjectsHost() && !scopeGroup(scope) && !children.some((child) => child.current),
       },
       ...children,
     ];
   }
 
   /**
-   * One group per category that has repositories, and under the repository in scope the
+   * One group per **component** that has repositories, and under the repository in scope the
    * applications that have something to say about it.
+   *
+   * A repository the platform gives no component draws under its archetype category instead, so a
+   * platform whose wrapper is not reorganised yet renders exactly the six groups it always did, a
+   * reorganised one renders components alone, and a half-migrated one renders both.
    *
    * The children hang off the repository in scope alone. A tree that opened every repository would
    * be as long as the project is big, and it would say nothing about where the reader is.
@@ -708,28 +715,36 @@ export class QitsMainLayout {
     if (this.repositories.failed()) {
       return [{ kind: 'alert', key: 'repositories-failed', label: 'Could not load repositories.' }];
     }
-    const all = this.repositories.repositories() ?? [];
+    const addressed = scopeGroup(scope);
     const origin = this.projectsOrigin();
     const rows: QitsNavRow[] = [];
-    for (const category of QITS_CATEGORIES) {
-      // By name, not in the order the API answered: a sidebar a reader scans has to be predictable,
-      // and case is not a fact about a repository worth ordering by.
-      const inGroup = all
-        .filter((repository) => repository.category === category)
-        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-      if (inGroup.length === 0) continue;
-      rows.push({ kind: 'heading', key: `heading:${category}`, label: category.toUpperCase() });
-      for (const repository of inGroup) {
-        const open = scope.category === category && scope.repository === repository.name;
-        const inScope: QitsScope = { project, category, repository: repository.name };
+    for (const group of repositoryGroups(this.repositories.repositories() ?? [])) {
+      rows.push({ kind: 'heading', key: `heading:${group.key}`, label: group.label });
+      for (const repository of group.repositories) {
+        // Either spelling of the middle segment opens the row: a deep link made before the wrapper
+        // moved names the category, and the reader is on that repository all the same.
+        const open =
+          scope.repository === repository.name &&
+          (addressed === group.key || addressed === repository.category);
+        const inScope: QitsScope = { project, group: group.key, repository: repository.name };
+        // The children are the entries of the repository's ARCHETYPE — the slot vocabulary is about
+        // which kinds of repository an application has something to say about, which is a different
+        // question from which component it belongs to.
         // `scoped: false` — an application with no host has no address for this repository, so its
         // row leads to its front page and says nothing about where the reader is.
-        const children = open
-          ? this.entryRows(`${category}.details`, inScope, `${category}.details`, true, false)
-          : [];
+        const children =
+          open && repository.category
+            ? this.entryRows(
+                `${repository.category}.details`,
+                inScope,
+                `${repository.category}.details`,
+                true,
+                false,
+              )
+            : [];
         rows.push({
           kind: 'link',
-          key: `repository:${category}/${repository.name}`,
+          key: `repository:${group.key}/${repository.name}`,
           label: repository.name,
           href: link(origin, inScope, ''),
           current: open && this.onProjectsHost() && !children.some((child) => child.current),
@@ -781,6 +796,54 @@ export class QitsMainLayout {
     }
     return rows;
   }
+}
+
+/** One heading of the sidebar and the repositories under it, in the order they are drawn. */
+interface QitsRepositoryGroup {
+  /** The segment the address spells: a component name, or a category for a repository with none. */
+  readonly key: string;
+  readonly label: string;
+  readonly repositories: readonly QitsRepository[];
+}
+
+/**
+ * The repositories of a project, grouped for the sidebar: **components first, alphabetically, then
+ * the archetype categories in their own order.**
+ *
+ * <p>Components lead because they are what the platform now says a repository belongs to, and they
+ * are sorted by name because nothing else about an open set of names is predictable to a reader.
+ * The categories keep the order they have always been drawn in — services, daemons, libs,
+ * frontends, cli, images — and sit below as what is left of the archetype layout: on a platform
+ * that has finished migrating there are none, and on one that has not started there are only these.
+ *
+ * <p>A repository with neither a component nor an archetype this library knows is left out rather
+ * than filed under a guess.
+ */
+function repositoryGroups(all: readonly QitsRepository[]): QitsRepositoryGroup[] {
+  const byKey = new Map<string, QitsRepository[]>();
+  const components = new Set<string>();
+  for (const repository of all) {
+    const key = repository.component || repository.category;
+    if (!key) continue;
+    if (repository.component) components.add(key);
+    const group = byKey.get(key);
+    if (group) group.push(repository);
+    else byKey.set(key, [repository]);
+  }
+  const byName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' });
+  const keys = [
+    ...[...components].sort(byName),
+    ...QITS_CATEGORIES.filter((category) => byKey.has(category) && !components.has(category)),
+  ];
+  return keys.map((key) => ({
+    key,
+    // A component is a name and is shown as one; a category is a vocabulary word and is shouted,
+    // as it always was. The heading style uppercases both on screen either way.
+    label: components.has(key) ? key : key.toUpperCase(),
+    // By name, not in the order the API answered: a sidebar a reader scans has to be predictable,
+    // and case is not a fact about a repository worth ordering by.
+    repositories: [...(byKey.get(key) ?? [])].sort((a, b) => byName(a.name, b.name)),
+  }));
 }
 
 /** At most one row is the page, and it is the first — the rows are ordered most specific first. */

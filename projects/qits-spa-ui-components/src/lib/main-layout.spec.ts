@@ -483,6 +483,130 @@ describe('QitsMainLayout', () => {
       expect(artifacts?.getAttribute('aria-current')).toBeNull();
     });
 
+    /**
+     * The heart of the reorganisation: a repository draws under its component, and the archetype
+     * categories are what is left for the rows the platform has not given one.
+     */
+    describe('grouped by component', () => {
+      /** A half-migrated platform: two components, and two repositories still only archetyped. */
+      const MIXED: readonly QitsRepository[] = [
+        { id: 'r1', name: 'qits-ci-service', component: 'qits-ci', category: 'services' },
+        { id: 'r2', name: 'qits-ci-daemon', component: 'qits-ci', category: 'daemons' },
+        {
+          id: 'r3',
+          name: 'qits-artifacts-service',
+          component: 'qits-artifacts',
+          category: 'services',
+        },
+        { id: 'r4', name: 'qits-eventstream', category: 'libs' },
+        { id: 'r5', name: 'qits-spa-home', category: 'frontends' },
+      ];
+
+      it('draws the components first, in name order, then what is left of the categories', async () => {
+        const fixture = await renderTree({ url: '/qits/', repositories: MIXED });
+
+        expect(headings(fixture)).toEqual([
+          'qits-artifacts',
+          'qits-ci',
+          'LIBS',
+          'FRONTENDS',
+          'PLATFORM',
+          'SYSTEM',
+        ]);
+        expect(labels(fixture)).toEqual([
+          'Project',
+          'Project setup',
+          'Workspaces',
+          'qits-artifacts-service',
+          // Both repositories of the component sit together, whatever their archetypes are.
+          'qits-ci-daemon',
+          'qits-ci-service',
+          'qits-eventstream',
+          'qits-spa-home',
+          'Events',
+          'Overview',
+          'System',
+        ]);
+      });
+
+      it('draws no category group at all once every repository has a component', async () => {
+        const fixture = await renderTree({
+          url: '/qits/',
+          repositories: MIXED.filter((repository) => repository.component),
+        });
+        expect(headings(fixture)).toEqual(['qits-artifacts', 'qits-ci', 'PLATFORM', 'SYSTEM']);
+      });
+
+      it('addresses a repository by its component, and one without by its category', async () => {
+        const fixture = await renderTree({ url: '/qits/', repositories: MIXED });
+        const href = (label: string) =>
+          links(fixture)
+            .find((a) => a.textContent?.trim() === label)
+            ?.getAttribute('href');
+
+        expect(href('qits-ci-service')).toBe(`${PROJECTS_ORIGIN}/qits/qits-ci/qits-ci-service/`);
+        expect(href('qits-eventstream')).toBe(`${PROJECTS_ORIGIN}/qits/libs/qits-eventstream/`);
+      });
+
+      it('opens a component address, with the children of the repository’s own archetype', async () => {
+        const fixture = await renderTree({
+          url: '/qits/qits-ci/qits-ci-service/',
+          repositories: MIXED,
+        });
+
+        expect(current(fixture)).toEqual(['qits-ci-service']);
+        // `services.details`, because that is what the repository IS — the slot vocabulary is about
+        // kinds of repository, and the component it belongs to says nothing about that.
+        const children = links(fixture).filter((a) =>
+          a.classList.contains('qits-layout-link-child'),
+        );
+        expect(children.map((a) => a.textContent?.trim())).toEqual([
+          'Project setup',
+          'Workspaces',
+          'Docs',
+          'CI',
+          'Artifacts',
+          'Api Docs',
+        ]);
+      });
+
+      /** A link made before the wrapper moved still resolves, and opens the row where it now sits. */
+      it('opens the same repository from its archetype address', async () => {
+        const fixture = await renderTree({
+          url: '/qits/services/qits-ci-service/',
+          repositories: MIXED,
+        });
+
+        expect(current(fixture)).toEqual(['qits-ci-service']);
+        // Under the `qits-ci` heading all the same: where a row is drawn is the platform's answer,
+        // not the address's.
+        expect(headings(fixture)).toContain('qits-ci');
+      });
+
+      /** A component is enough to place a row; only a row with neither fact is left out. */
+      it('draws a repository whose archetype it does not know, once it has a component', async () => {
+        const fixture = await renderTree({
+          url: '/qits/qits-ci/qits-ci-oci/',
+          repositories: [
+            { id: 'r1', name: 'qits-ci-oci', component: 'qits-ci', category: undefined },
+            { id: 'r2', name: 'qits-qits', category: undefined },
+          ],
+        });
+
+        expect(labels(fixture)).toContain('qits-ci-oci');
+        expect(labels(fixture)).not.toContain('qits-qits');
+        // No archetype, so no slot to hang children off — the row is the whole of it.
+        expect(current(fixture)).toEqual(['qits-ci-oci']);
+        expect(
+          links(fixture).filter((a) => a.classList.contains('qits-layout-link-child')),
+        ).toEqual(
+          links(fixture).filter((a) =>
+            ['Project setup', 'Workspaces'].includes(a.textContent?.trim() ?? ''),
+          ),
+        );
+      });
+    });
+
     it('says the repositories are still coming, rather than drawing no groups', async () => {
       const fixture = await renderTree({ url: '/qits/', pendingRepositories: true });
       expect(fixture.nativeElement.querySelector('.qits-layout-note')?.textContent).toContain(

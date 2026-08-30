@@ -50,6 +50,7 @@ export {
   QITS_CATEGORIES,
   QITS_SCOPE,
   scopeCommands,
+  scopeGroup,
   scopePath,
   UrlScope,
 } from './lib/scope';

@@ -15,16 +15,23 @@ import { QITS_SCOPE, type QitsCategory } from './scope';
 export interface QitsRepository {
   readonly id: string;
   readonly name: string;
-  /** `undefined` for an archetype this library does not group — such a row is left out. */
+  /**
+   * The technical component this repository is part of — `qits-ci` — which is what the sidebar
+   * groups by and what the address spells. Absent on a platform whose wrapper is not reorganised
+   * yet, and then the archetype category below is the group.
+   */
+  readonly component?: string;
+  /** `undefined` for an archetype this library does not know. */
   readonly category: QitsCategory | undefined;
 }
 
 /**
- * The archetype qits-projects records, mapped to the category URLs and the sidebar use.
+ * The archetype qits-projects records, mapped to the category the chrome groups a componentless
+ * repository by — and, under it, the `<category>.details` slot its children come from.
  *
  * <p><b>Copied, not imported.</b> This library depends on no qits module, so the table lives here;
- * an archetype it does not know maps to nothing and its repository is left out of the groups rather
- * than filed under a guess.
+ * an archetype it does not know maps to nothing, and a repository with neither a component nor a
+ * known archetype is left out of the groups rather than filed under a guess.
  */
 const CATEGORY_OF: Readonly<Record<string, QitsCategory>> = {
   SERVICE: 'services',
@@ -42,6 +49,12 @@ export interface QitsRepositoryEntries {
       readonly id?: string;
       readonly name?: string;
       readonly archetype?: string;
+      /**
+       * The component, once qits-projects records one. `null` for a row that has none and absent
+       * altogether from a platform released before the field existed — both mean the same here, so
+       * neither is a reason to leave the row out.
+       */
+      readonly component?: string | null;
     };
   }[];
   readonly wrapper?: { readonly repositoryId?: string } | null;
@@ -73,9 +86,15 @@ function toRepository(row: {
   id?: string;
   name?: string;
   archetype?: string;
+  component?: string | null;
 }): QitsRepository | undefined {
   if (!row?.id || !row.name) return undefined;
-  return { id: row.id, name: row.name, category: CATEGORY_OF[row.archetype ?? ''] };
+  return {
+    id: row.id,
+    name: row.name,
+    component: row.component || undefined,
+    category: CATEGORY_OF[row.archetype ?? ''],
+  };
 }
 
 /**

@@ -160,12 +160,13 @@ const DEMO_PROJECTS: readonly QitsProject[] = [
   { id: 'p3', slug: 'platform-infra', name: 'Platform infrastructure' },
 ];
 
+/** A half-migrated platform: three repositories filed under a component, two only archetyped. */
 const DEMO_REPOSITORIES: readonly QitsRepository[] = [
-  { id: 'r1', name: 'qits-ci', category: 'services' },
-  { id: 'r2', name: 'qits-projects', category: 'services' },
-  { id: 'r3', name: 'qits-workspaces', category: 'services' },
-  { id: 'r4', name: 'qits-eventstream', category: 'libs' },
-  { id: 'r5', name: 'qits-spa-projects', category: 'frontends' },
+  { id: 'r1', name: 'qits-ci-service', component: 'qits-ci', category: 'services' },
+  { id: 'r2', name: 'qits-ci-frontend', component: 'qits-ci', category: 'frontends' },
+  { id: 'r3', name: 'qits-projects-service', component: 'qits-projects', category: 'services' },
+  { id: 'r4', name: 'qits-workspaces', category: 'services' },
+  { id: 'r5', name: 'qits-eventstream', category: 'libs' },
 ];
 
 /**
@@ -224,7 +225,8 @@ export const Branded: Story = { args: { brand: 'qits ci' } };
 
 /**
  * A project in scope. The Project node and what belongs to the project come first, then one group
- * per category that has repositories — the sidebar the platform's own URL grammar makes possible.
+ * per **component** that has repositories, and the archetype categories below for the repositories
+ * the platform has not given one — the sidebar the platform's own URL grammar makes possible.
  */
 export const Grouped: Story = {
   decorators: [applicationConfig({ providers: [scopeAt({ project: 'qits' })] })],
@@ -243,7 +245,7 @@ export const RepositoryInScope: Story = {
   decorators: [
     applicationConfig({
       providers: [
-        scopeAt({ project: 'qits', category: 'services', repository: 'qits-ci' }),
+        scopeAt({ project: 'qits', group: 'qits-ci', repository: 'qits-ci-service' }),
         { provide: QITS_BROWSER_ORIGIN, useValue: CI_ORIGIN },
       ],
     }),
@@ -318,7 +320,7 @@ export const WithSubmenu: Story = {
     moduleMetadata({ imports: [QitsNavSubmenu] }),
     applicationConfig({
       providers: [
-        scopeAt({ project: 'qits', category: 'services', repository: 'qits-ci' }),
+        scopeAt({ project: 'qits', group: 'qits-ci', repository: 'qits-ci-service' }),
         { provide: QITS_BROWSER_ORIGIN, useValue: CI_ORIGIN },
       ],
     }),

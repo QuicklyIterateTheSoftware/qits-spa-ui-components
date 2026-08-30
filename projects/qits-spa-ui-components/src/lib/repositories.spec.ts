@@ -87,6 +87,42 @@ describe('provideQitsRepositories', () => {
     expect(repositories.failed()).toBe(false);
   });
 
+  /** A row carries a component only once the wrapper is reorganised, so all three shapes arrive. */
+  it('takes the component where the row names one, and none where it does not', () => {
+    const repositories = source();
+    open('p1');
+    http()
+      .expectOne(`${QITS_REPOSITORIES_URL}/p1/repositories`)
+      .flush({
+        entries: [
+          {
+            repository: {
+              id: 'r1',
+              name: 'qits-ci-service',
+              archetype: 'SERVICE',
+              component: 'qits-ci',
+            },
+          },
+          {
+            repository: { id: 'r2', name: 'qits-ci-daemon', archetype: 'DAEMON', component: null },
+          },
+          { repository: { id: 'r3', name: 'qits-eventstream', archetype: 'LIBRARY' } },
+        ],
+      });
+
+    expect(repositories.repositories()?.map((entry) => entry.component)).toEqual([
+      'qits-ci',
+      undefined,
+      undefined,
+    ]);
+    // The archetype is still read: the sidebar's child entries hang off it, component or not.
+    expect(repositories.repositories()?.map((entry) => entry.category)).toEqual([
+      'services',
+      'daemons',
+      'libs',
+    ]);
+  });
+
   it('reads no wrapper as none, rather than as a failure', () => {
     const repositories = source();
     open('p1');
