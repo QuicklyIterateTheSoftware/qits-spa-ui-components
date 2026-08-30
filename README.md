@@ -1,4 +1,4 @@
-# qits-spa-ui-components
+# qits-ui-components-jslib
 
 The shared Angular component library for qits frontends, published as **`@qits/ui-components`**.
 
@@ -67,7 +67,7 @@ images`. Both forms resolve, and `QitsScope` carries the segment as `group` eith
 `category` set as well where it spells one of the six.
 
 ```ts
-parseScope('/qits/services/qits-ci/runs/1'); //     { project, group: 'services', category: 'services', repository: 'qits-ci' }
+parseScope('/qits/services/qits-ci-service/runs/1'); // { project, group: 'services', category: 'services', repository: 'qits-ci-service' }
 parseScope('/traces'); //                           {} — an application's own page
 parseScope('/qits/epics/1', knownSlugs); //         { project: 'qits' } — the platform has that slug
 parseScope('/qits/qits-ci/qits-ci-service', knownSlugs, knownComponents);
@@ -187,7 +187,7 @@ resolve ids, and this is where the two meet.
 ```ts
 const appLinks = inject(QitsAppLinks); // providedIn: 'root'
 
-appLinks.href('qits-ci', '', scope()); //            https://ci.dev.example.com/qits/services/qits-ci/
+appLinks.href('qits-ci', '', scope()); //            https://ci.dev.example.com/qits/qits-ci/qits-ci-service/
 appLinks.href('qits-ci', 'runs/7', { project }); //  https://ci.dev.example.com/qits/runs/7
 appLinks.href('qits-artifacts', 'images', scope()); // https://dev.example.com/artifacts/images
 appLinks.origin('qits-artifacts'); //                undefined — no host of its own yet

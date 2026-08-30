@@ -62,4 +62,4 @@ the app shell beside the `<router-outlet />`, never inside a page, or it is rebu
 navigation and loses its state.
 
 Source, the component reference and the development commands are in the
-[repository README](https://github.com/QuicklyIterateTheSoftware/qits-spa-ui-components).
+[repository README](https://github.com/QuicklyIterateTheSoftware/qits-ui-components-jslib).
