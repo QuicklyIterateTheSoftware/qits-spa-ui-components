@@ -6,23 +6,26 @@ import { PRIMARY_OUTLET, provideRouter, Router } from '@angular/router';
 import { QITS_BROWSER_ORIGIN } from './app-links';
 import { provideQitsNavigationTree } from './navigation';
 import { provideQitsProjectList } from './projects';
-import { provideQitsRepositoryList } from './repositories';
+import { provideQitsRepositoryList, type QitsRepository } from './repositories';
 import {
   parseScope,
   provideQitsScope,
   QITS_CATEGORIES,
   QITS_SCOPE,
   scopeCommands,
+  scopeGroup,
   scopePath,
   type QitsRouting,
 } from './scope';
 
 describe('parseScope', () => {
   const KNOWN = new Set(['qits', 'payments']);
+  const COMPONENTS = new Set(['qits-ci', 'qits-projects']);
 
   it('reads a repository out of the path, whatever follows it', () => {
     expect(parseScope('/qits/services/qits-ci/runs/1')).toEqual({
       project: 'qits',
+      group: 'services',
       category: 'services',
       repository: 'qits-ci',
     });
@@ -32,9 +35,44 @@ describe('parseScope', () => {
   it('needs no known slug when segment two is a category', () => {
     expect(parseScope('/anything/libs/qits-eventstream/')).toEqual({
       project: 'anything',
+      group: 'libs',
       category: 'libs',
       repository: 'qits-eventstream',
     });
+  });
+
+  /** A component is an open set, so the list the chrome loaded is what proves this segment. */
+  it('reads the component form once the components are known', () => {
+    expect(parseScope('/qits/qits-ci/qits-ci-service/runs/1', KNOWN, COMPONENTS)).toEqual({
+      project: 'qits',
+      group: 'qits-ci',
+      repository: 'qits-ci-service',
+    });
+    // No category: the segment is a component, and nothing about the archetype is in the address.
+    expect(parseScope('/qits/qits-ci/qits-ci-service', KNOWN, COMPONENTS).category).toBeUndefined();
+  });
+
+  it('reads a component with no repository under it as the project it is in', () => {
+    expect(parseScope('/qits/qits-ci', KNOWN, COMPONENTS)).toEqual({
+      project: 'qits',
+      group: 'qits-ci',
+    });
+  });
+
+  /** Until the repository list answers there is nothing to prove the segment with. */
+  it('settles the component form on the project alone until the components are known', () => {
+    expect(parseScope('/qits/qits-ci/qits-ci-service', KNOWN)).toEqual({ project: 'qits' });
+    // …and the project it names never changes when they arrive.
+    expect(parseScope('/qits/qits-ci/qits-ci-service', KNOWN, COMPONENTS).project).toBe('qits');
+  });
+
+  /** A component of some project is no proof that segment one is a project at all. */
+  it('never reads a component form under a slug the platform does not have', () => {
+    expect(parseScope('/traces/qits-ci/qits-ci-service', KNOWN, COMPONENTS)).toEqual({});
+  });
+
+  it('keeps an app page inside a project unscoped below the project', () => {
+    expect(parseScope('/qits/epics/1', KNOWN, COMPONENTS)).toEqual({ project: 'qits' });
   });
 
   it('leaves an application page unscoped rather than reading it as a project', () => {
@@ -57,12 +95,17 @@ describe('parseScope', () => {
   });
 
   it('reads a category with no repository under it as the project it is in', () => {
-    expect(parseScope('/qits/services')).toEqual({ project: 'qits', category: 'services' });
+    expect(parseScope('/qits/services')).toEqual({
+      project: 'qits',
+      group: 'services',
+      category: 'services',
+    });
   });
 
   it('stops at the query and the fragment', () => {
     expect(parseScope('/qits/services/qits-ci?tab=log#l3')).toEqual({
       project: 'qits',
+      group: 'services',
       category: 'services',
       repository: 'qits-ci',
     });
@@ -73,20 +116,44 @@ describe('scopePath and scopeCommands', () => {
   it('spell the three shapes of address', () => {
     expect(scopePath({})).toBe('/');
     expect(scopePath({ project: 'qits' })).toBe('/qits/');
+    expect(scopePath({ project: 'qits', group: 'qits-ci', repository: 'qits-ci-service' })).toBe(
+      '/qits/qits-ci/qits-ci-service/',
+    );
+    // A group with nothing under it is not an address: the project is the honest base.
+    expect(scopePath({ project: 'qits', group: 'qits-ci' })).toBe('/qits/');
+    expect(scopePath(undefined)).toBe('/');
+  });
+
+  /** A caller that spelled the archetype form before components existed keeps spelling it. */
+  it('spell the category a caller wrote where no group was given', () => {
     expect(scopePath({ project: 'qits', category: 'services', repository: 'qits-ci' })).toBe(
       '/qits/services/qits-ci/',
     );
-    // A category with nothing under it is not an address: the project is the honest base.
     expect(scopePath({ project: 'qits', category: 'services' })).toBe('/qits/');
-    expect(scopePath(undefined)).toBe('/');
   });
 
   it('give the same prefix as router commands', () => {
     expect(scopeCommands({})).toEqual(['/']);
     expect(scopeCommands({ project: 'qits' })).toEqual(['/', 'qits']);
     expect(
+      scopeCommands({ project: 'qits', group: 'qits-eventstream', repository: 'qits-eventstream' }),
+    ).toEqual(['/', 'qits', 'qits-eventstream', 'qits-eventstream']);
+    expect(
       scopeCommands({ project: 'qits', category: 'libs', repository: 'qits-eventstream' }),
     ).toEqual(['/', 'qits', 'libs', 'qits-eventstream']);
+  });
+});
+
+describe('scopeGroup', () => {
+  it('is the one middle segment, whichever field named it', () => {
+    expect(scopeGroup({ project: 'qits', group: 'qits-ci' })).toBe('qits-ci');
+    expect(scopeGroup({ project: 'qits', category: 'services' })).toBe('services');
+    // The group wins: a scope the parser produced states both for an address in the archetype form.
+    expect(scopeGroup({ project: 'qits', group: 'services', category: 'services' })).toBe(
+      'services',
+    );
+    expect(scopeGroup({})).toBeUndefined();
+    expect(scopeGroup(undefined)).toBeUndefined();
   });
 });
 
@@ -140,14 +207,18 @@ describe('UrlScope', () => {
     };
   }
 
-  function configure(routing: QitsRouting, doc = documentStub()) {
+  function configure(
+    routing: QitsRouting,
+    doc = documentStub(),
+    repositories: readonly QitsRepository[] = [{ id: 'r1', name: 'qits-ci', category: 'services' }],
+  ) {
     TestBed.configureTestingModule({
       providers: [
         provideRouter([{ path: '**', component: Blank }]),
         provideLocationMocks(),
         provideQitsNavigationTree(NAVIGATION),
         provideQitsProjectList([{ id: 'p1', slug: 'qits', name: 'qits' }]),
-        provideQitsRepositoryList([{ id: 'r1', name: 'qits-ci', category: 'services' }]),
+        provideQitsRepositoryList(repositories),
         { provide: DOCUMENT, useValue: doc },
         { provide: QITS_BROWSER_ORIGIN, useValue: doc.location.origin },
         provideQitsScope(routing),
@@ -163,8 +234,43 @@ describe('UrlScope', () => {
     expect(scope.scope()).toEqual({});
 
     await router.navigateByUrl('/qits/services/qits-ci/runs/1');
-    expect(scope.scope()).toEqual({ project: 'qits', category: 'services', repository: 'qits-ci' });
+    expect(scope.scope()).toEqual({
+      project: 'qits',
+      group: 'services',
+      category: 'services',
+      repository: 'qits-ci',
+    });
     expect(scope.routing).toBe('repository');
+  });
+
+  /** The components come from the project's own repositories, which is what proves the segment. */
+  it('reads the component form from the components its repositories carry', async () => {
+    configure('repository', documentStub(), [
+      { id: 'r1', name: 'qits-ci-service', component: 'qits-ci', category: 'services' },
+    ]);
+    const scope = TestBed.inject(QITS_SCOPE);
+
+    await TestBed.inject(Router).navigateByUrl('/qits/qits-ci/qits-ci-service/runs/1');
+
+    expect(scope.scope()).toEqual({
+      project: 'qits',
+      group: 'qits-ci',
+      repository: 'qits-ci-service',
+    });
+    expect(scope.repositoryId()).toBe('r1');
+  });
+
+  /** Both forms address the same repository: a link made before the wrapper moved still resolves. */
+  it('resolves the archetype form of a repository that has a component too', async () => {
+    configure('repository', documentStub(), [
+      { id: 'r1', name: 'qits-ci-service', component: 'qits-ci', category: 'services' },
+    ]);
+    const scope = TestBed.inject(QITS_SCOPE);
+
+    await TestBed.inject(Router).navigateByUrl('/qits/services/qits-ci-service/');
+
+    expect(scopeGroup(scope.scope())).toBe('services');
+    expect(scope.repositoryId()).toBe('r1');
   });
 
   it('resolves the slug to an id, and the repository name to its id', async () => {
