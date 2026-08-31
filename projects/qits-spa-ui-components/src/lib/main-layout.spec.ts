@@ -668,6 +668,130 @@ describe('QitsMainLayout', () => {
       expect(fixture.nativeElement.querySelector('.qits-layout-submenu-detached')).not.toBeNull();
       expect(fixture.nativeElement.querySelectorAll('.qits-layout-submenu')).toHaveLength(1);
     });
+
+    /**
+     * One application, two rows, one slot: qits-workspaces hangs both `Workspaces` and `Editor`
+     * under the Project node, and the two differ only by the subpath the second one opens. The
+     * platform keys an entry by slot and label, so this is a shape the edge now serves — and the
+     * application alone can no longer name a row, nor a prefix match alone name the page.
+     */
+    describe('two entries of one application in one slot', () => {
+      const WORKSPACES_ORIGIN = 'https://workspaces.dev.example.com';
+
+      const TWO_ROWS: QitsNavigation = {
+        ...TREE,
+        slots: {
+          ...TREE.slots,
+          'project.detail': [
+            {
+              app: 'qits-workspaces',
+              label: 'Workspaces',
+              host: 'workspaces',
+              path: '/workspaces',
+              origin: WORKSPACES_ORIGIN,
+              position: 1,
+            },
+            {
+              app: 'qits-workspaces',
+              label: 'Editor',
+              host: 'workspaces',
+              path: '/workspaces',
+              origin: WORKSPACES_ORIGIN,
+              position: 2,
+              subpath: 'editor',
+            },
+          ],
+        },
+      };
+
+      /** The reader is on the workspaces host, which is the one that serves both rows. */
+      async function renderBoth(
+        url: string,
+        browserOrigin = WORKSPACES_ORIGIN,
+      ): Promise<ComponentFixture<QitsMainLayout>> {
+        TestBed.configureTestingModule({
+          providers: [
+            provideRouter([{ path: '**', component: Blank }]),
+            provideLocationMocks(),
+            provideQitsNavigationTree(TWO_ROWS),
+            provideQitsProjectList(PROJECTS),
+            provideQitsRepositoryList(REPOSITORIES, 'r9'),
+            provideQitsScope('repository'),
+            { provide: QITS_BROWSER_ORIGIN, useValue: browserOrigin },
+          ],
+        });
+        await TestBed.inject(Router).navigateByUrl(url);
+        const fixture = TestBed.createComponent(QitsMainLayout);
+        fixture.detectChanges();
+        return fixture;
+      }
+
+      function rows(fixture: ComponentFixture<unknown>): HTMLAnchorElement[] {
+        return links(fixture).filter((a) =>
+          ['Workspaces', 'Editor'].includes(a.textContent?.trim() ?? ''),
+        );
+      }
+
+      it('draws both rows, in position order, each at its own address', async () => {
+        const both = rows(await renderBoth('/qits/'));
+
+        expect(both.map((a) => a.textContent?.trim())).toEqual(['Workspaces', 'Editor']);
+        // The subpath is what the two hrefs differ by; without it they would be one destination.
+        expect(both.map((a) => a.getAttribute('href'))).toEqual([
+          `${WORKSPACES_ORIGIN}/qits/`,
+          `${WORKSPACES_ORIGIN}/qits/editor`,
+        ]);
+      });
+
+      /**
+       * Two rows keyed by the application alone are one key to `@for … track`, and Angular says so
+       * with NG0955 — on the *reconcile*, which is why this navigates rather than only rendering.
+       * A duplicated key is not a cosmetic warning: it is what lets the list attribute one row's
+       * DOM to the other across a re-render.
+       */
+      it('gives each row a key of its own, so neither is tracked as the other', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        try {
+          const fixture = await renderBoth('/qits/');
+          await TestBed.inject(Router).navigateByUrl('/qits/editor');
+          fixture.detectChanges();
+
+          expect(rows(fixture).map((a) => a.textContent?.trim())).toEqual(['Workspaces', 'Editor']);
+          expect(rows(fixture).map((a) => a.getAttribute('href'))).toEqual([
+            `${WORKSPACES_ORIGIN}/qits/`,
+            `${WORKSPACES_ORIGIN}/qits/editor`,
+          ]);
+          expect(warn.mock.calls.flat().join(' ')).not.toContain('NG0955');
+        } finally {
+          warn.mockRestore();
+        }
+      });
+
+      it('gives the page to the subpathed row, not to its subpath-less sibling', async () => {
+        // `isCurrent` is a prefix test, so `Workspaces` matches here too — the deeper view wins.
+        expect(current(await renderBoth('/qits/editor'))).toEqual(['Editor']);
+      });
+
+      it('leaves the subpath-less row the page on its own view', async () => {
+        expect(current(await renderBoth('/qits/'))).toEqual(['Workspaces']);
+      });
+
+      it('hangs the sub-menu exactly once, under the row that is the page', async () => {
+        const fixture = await renderBoth('/qits/editor');
+        const templates = TestBed.createComponent(Templates);
+        templates.detectChanges();
+        TestBed.inject(QitsNavSubmenuSlot).register(templates.componentInstance.first());
+        fixture.detectChanges();
+
+        expect(fixture.nativeElement.querySelectorAll('.qits-layout-submenu')).toHaveLength(1);
+        const items = [...fixture.nativeElement.querySelectorAll('.qits-layout-links > li')];
+        const owner = items.find((li) => (li as HTMLElement).querySelector('.qits-layout-submenu'));
+        expect((owner as HTMLElement).querySelector('.qits-layout-link')?.textContent?.trim()).toBe(
+          'Editor',
+        );
+        expect(fixture.nativeElement.querySelector('.qits-layout-submenu-detached')).toBeNull();
+      });
+    });
   });
 
   /** Two templates, so the stack can be exercised without a second component. */

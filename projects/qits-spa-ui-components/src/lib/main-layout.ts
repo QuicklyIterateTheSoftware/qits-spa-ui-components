@@ -12,7 +12,12 @@ import { RouterOutlet } from '@angular/router';
 
 import { QitsAppLinks, QITS_BROWSER_ORIGIN } from './app-links';
 import { QitsNavSubmenuSlot } from './nav-submenu';
-import { QITS_NAVIGATION, type QitsNavLink, type QitsNavSlot } from './navigation';
+import {
+  QITS_NAVIGATION,
+  type QitsNavEntry,
+  type QitsNavLink,
+  type QitsNavSlot,
+} from './navigation';
 import { QitsPicker, type QitsPickerOption } from './picker';
 import { QITS_PROJECTS } from './projects';
 import { QITS_REPOSITORIES, type QitsRepository } from './repositories';
@@ -771,6 +776,18 @@ export class QitsMainLayout {
    * an application has no scoped address. `scoped` is how the caller says that dropping the scope
    * would be a lie rather than a fallback: under a repository, an unscoped link goes to the
    * application's front page, so it is drawn but never marked as the repository on screen.
+   *
+   * <p><b>One application may hold several entries in one slot</b> — a second row for a second view
+   * of itself, `Workspaces` and `Editor` under the Project node, differing by their subpath. So a
+   * row is named by its label as well as its application: the platform files an entry under slot
+   * and label, and two rows sharing a key would be one key for `@for … track` (NG0955) and one
+   * place for the sub-menu to hang.
+   *
+   * <p>And the <b>most specific view wins</b> within the slot. `isCurrent` asks whether the reader
+   * is *inside* an entry's view, which is a prefix test, so on `/qits/editor` the subpath-less row
+   * answers yes alongside the `editor` one. The longest matching subpath is the page, and it is
+   * settled here because `firstCurrentOnly` knows only the order the rows are drawn in — which is
+   * position order, and would hand the page to whichever of the two the platform put first.
    */
   private entryRows(
     slot: QitsNavSlot,
@@ -779,22 +796,28 @@ export class QitsMainLayout {
     child = true,
     scoped = true,
   ): QitsNavRow[] {
-    const rows: QitsNavRow[] = [];
+    const drawn: { readonly entry: QitsNavEntry; readonly href: string }[] = [];
     for (const entry of this.appLinks.entries(slot)) {
       // The entry's subpath is the view it opens — '' is the application's root, which is what
       // every entry was before subpaths existed.
       const href = this.appLinks.href(entry.app, entry.subpath, scope);
-      if (!href) continue;
-      rows.push({
-        kind: 'link',
-        key: `${keyPrefix}:${entry.app}`,
-        label: entry.label,
-        href,
-        current: (scoped || entry.host !== null) && this.appLinks.isCurrent(entry, scope),
-        child,
-      });
+      if (href) drawn.push({ entry, href });
     }
-    return rows;
+    const matching = drawn
+      .filter(
+        ({ entry }) => (scoped || entry.host !== null) && this.appLinks.isCurrent(entry, scope),
+      )
+      .map(({ entry }) => entry);
+    const inside = new Set(matching);
+    const deepest = Math.max(-1, ...matching.map((entry) => entry.subpath.length));
+    return drawn.map(({ entry, href }) => ({
+      kind: 'link' as const,
+      key: `${keyPrefix}:${entry.app}:${entry.label}`,
+      label: entry.label,
+      href,
+      current: inside.has(entry) && entry.subpath.length === deepest,
+      child,
+    }));
   }
 }
 
