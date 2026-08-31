@@ -245,6 +245,14 @@ At most one row is marked current, and it is the most specific: the rows are bui
 the first current one wins. Two rows claiming the page would be two answers to "where am I", and the
 sub-menu would have two places to go.
 
+**One application may hold several entries in one slot** — `Workspaces` and `Editor` under the
+Project node, the second one opening the same app's `editor` view. The platform files an entry under
+its slot and its label, so that is what names a row here as well: keying a row by the application
+alone would give two rows one `@for … track` key (NG0955) and one place for the sub-menu. Between
+two such rows the **longest matching subpath** is the page — `isCurrent` asks whether the reader is
+_inside_ an entry's view, which is a prefix test, so on `/qits/editor` the subpath-less sibling
+answers yes as well and would otherwise take the highlight by sitting first.
+
 The links leave the SPA on purpose. Each destination is its own Angular application on its own host,
 so they are plain `<a href>` full-document navigations — `routerLink` would look right and go
 nowhere. That holds for the repository rows too: they address qits-projects, not this app.
