@@ -130,6 +130,38 @@ steps:
         npm publish ./dist/qits-spa-ui-components
       fi
 
+      # THE SBOM, WHICH IS THE TARBALL'S RESOLVED DEPENDENCY TREE. It goes up before the run goes
+      # green, so the `SoftwareRelease` a real release announces can never name a version whose bill
+      # of materials is missing, and a failed PUT fails the release on purpose — the store being
+      # unreachable is not a reason to announce a version nobody can audit.
+      #
+      # IT SITS HERE RATHER THAN AT THE END OF THE STEP. The workbench below is the slow half of this
+      # step by a wide margin; an SBOM that cannot be produced or cannot be stored should say so
+      # before that runs, not after.
+      #
+      # IT IS UNCONDITIONAL, unlike the npm publish above, and for the reason that turned `exit 0`
+      # into a flag: a redelivery whose npm half had landed and whose SBOM had not would otherwise
+      # skip the repair and report green. The store answers a replay with 200 rather than a conflict,
+      # so re-sending an SBOM that is already there costs one request.
+      #
+      # cdxgen, NOT @cyclonedx/cyclonedx-npm: this repository's lockfile is `pnpm-lock.yaml` and
+      # cyclonedx-npm reads `package-lock.json` only — there is no flag that changes that. It comes
+      # through the mirror like every other package; `--registry` explicitly, because `npm exec`
+      # resolves the tool itself and the `@qits:` line in ~/.npmrc covers only the scope that owns
+      # this package.
+      #
+      # THIS IS THE NODE PILOT. Whether cdxgen's transitive graph over a pnpm workspace is complete
+      # enough to be worth storing is the question this one repository is here to answer; the rest of
+      # the node side waits on it.
+      npm exec --yes --registry "$QITS_NPM_PROXY_URL" -- \
+        @cyclonedx/cdxgen@11.2.7 -t pnpm --spec-version 1.6 -o sbom.json .
+      # Derived from the injected npm root, never spelled: the SBOM store is a sibling path of the
+      # registry inside the same qits-platform-artifacts deployment, exactly as $QITS_DOCS_URL is.
+      sbom_base="${QITS_NPM_REGISTRY_URL%%/artifacts/*}/artifacts/sboms"
+      curl -fsS -X PUT -H 'Content-Type: application/vnd.cyclonedx+json' \
+        --data-binary @sbom.json \
+        "$sbom_base/npm/@qits/ui-components/-/$version"
+
       # THE WORKBENCH, AS THE SECOND DECLARED ARTIFACT. Same tree, same version, same run — see the
       # `artifacts:` header on why this is not a pipeline of its own.
       #
