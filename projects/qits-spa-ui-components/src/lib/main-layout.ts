@@ -4,6 +4,7 @@ import {
   Component,
   computed,
   DOCUMENT,
+  ElementRef,
   inject,
   input,
   signal,
@@ -11,6 +12,8 @@ import {
 import { RouterOutlet } from '@angular/router';
 
 import { QitsAppLinks, QITS_BROWSER_ORIGIN } from './app-links';
+import { QitsBadge } from './badge';
+import { buildConfigName, QITS_BUILDS, QITS_BUILD_RUNNING } from './builds';
 import { QitsNavSubmenuSlot } from './nav-submenu';
 import {
   QITS_NAVIGATION,
@@ -47,6 +50,17 @@ function hostOf(origin: string | undefined): string | undefined {
 function link(origin: string | undefined, scope: QitsScope, path: string): string {
   const tail = `${scopePath(scope)}${path.replace(/^\/+/, '')}`;
   return origin ? `${origin.replace(/\/+$/, '')}${tail}` : tail;
+}
+
+/** One line of the pending-builds panel: a run, reduced to what a header affordance can show. */
+interface QitsBuildRow {
+  readonly id: string;
+  readonly repoName: string;
+  readonly branch: string;
+  readonly status: string;
+  /** The pipeline file's name alone — the directories are the same for every run on the platform. */
+  readonly config: string;
+  readonly running: boolean;
 }
 
 /** One line of the sidebar. Headings and notes are rows too, so the order is stated in one list. */
@@ -95,6 +109,12 @@ interface QitsNavRow {
  * belongs to a project, so which project is being looked at is the outermost thing about a page and
  * not a filter inside one of them. An app that provides no `QITS_PROJECTS` still gets `brand()`
  * there, which is what keeps this a slot rather than a requirement.
+ *
+ * **Beside it, the pending-builds bolt**, where an app provides `QITS_BUILDS` — a popover listing
+ * what qits-ci is building and what is waiting for a worker, asked for when it opens and refreshed
+ * while it stays open. It is a glance, not a page: four facts a row, and the run's own application
+ * is one click away in the sidebar. Nothing is requested while it is shut, and a `/ci` that cannot
+ * be reached is one quiet line inside the panel rather than anything the surrounding layout notices.
  *
  * ## How a link gets into the sidebar — and how to add or move one
  *
@@ -164,7 +184,14 @@ interface QitsNavRow {
 @Component({
   selector: 'qits-main-layout',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterOutlet, NgTemplateOutlet, QitsPicker],
+  imports: [RouterOutlet, NgTemplateOutlet, QitsPicker, QitsBadge],
+  // The two ways out of an open popover that are not the button itself. Both are on the document
+  // because both are about something happening *outside* the panel, and both are cheap: they read
+  // one signal and stop while it is closed, which is nearly always.
+  host: {
+    '(document:click)': 'onDocumentClick($event)',
+    '(document:keydown.escape)': 'onEscape()',
+  },
   template: `
     <div class="qits-layout">
       <header class="qits-layout-bar">
@@ -200,6 +227,57 @@ interface QitsNavRow {
           </div>
         } @else {
           <span class="qits-layout-brand">{{ brand() }}</span>
+        }
+
+        @if (hasBuilds) {
+          <div class="qits-layout-builds">
+            <button
+              type="button"
+              class="qits-layout-builds-toggle"
+              [class.qits-layout-builds-toggle-open]="buildsOpen()"
+              aria-label="Pending builds"
+              aria-controls="qits-layout-builds-panel"
+              [attr.aria-expanded]="buildsOpen()"
+              (click)="toggleBuilds()"
+            >
+              <svg class="qits-layout-bolt" viewBox="0 0 12 16" aria-hidden="true">
+                <path d="M7.5 0 L1 9.5 H5 L4.5 16 L11 6.5 H7 Z" />
+              </svg>
+            </button>
+
+            @if (buildsOpen()) {
+              <div
+                id="qits-layout-builds-panel"
+                class="qits-layout-builds-panel"
+                role="group"
+                aria-label="Pending builds"
+              >
+                @if (buildsFailed()) {
+                  <p class="qits-layout-builds-note qits-layout-builds-error">
+                    Builds unavailable.
+                  </p>
+                } @else if (buildsPending()) {
+                  <p class="qits-layout-builds-note">Checking…</p>
+                } @else if (buildRows().length === 0) {
+                  <p class="qits-layout-builds-note">Nothing building.</p>
+                } @else {
+                  <ul class="qits-layout-builds-list">
+                    @for (run of buildRows(); track run.id) {
+                      <li class="qits-layout-build" [class.qits-layout-build-running]="run.running">
+                        <span class="qits-layout-build-name">{{ run.repoName }}</span>
+                        <qits-badge
+                          [label]="run.status"
+                          [tone]="run.running ? 'info' : 'neutral'"
+                        />
+                        <span class="qits-layout-build-branch">{{ run.branch }}</span>
+                        <span class="qits-layout-build-config">{{ run.config }}</span>
+                      </li>
+                    }
+                  </ul>
+                }
+              </div>
+            }
+          </div>
         }
       </header>
 
@@ -344,6 +422,115 @@ interface QitsNavRow {
     }
     .qits-layout-project-error {
       color: #b91c1c;
+    }
+
+    /* The anchor the popover hangs from. It is the *button* the panel is positioned against, so the
+       wrapper is only as wide as the bolt and never takes width from the picker beside it. */
+    .qits-layout-builds {
+      position: relative;
+      flex: none;
+    }
+    .qits-layout-builds-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      /* The burger's box, so the two sit on one line with the picker's pill in a bar that may be
+         tall — this is the same row of the header, not a second one. */
+      min-height: 34px;
+      padding: 2px 8px;
+      background: transparent;
+      color: #6b7280;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .qits-layout-builds-toggle:hover {
+      background: #f3f4f6;
+      color: #111827;
+    }
+    .qits-layout-builds-toggle-open {
+      background: #e5e7eb;
+      color: #111827;
+    }
+    .qits-layout-bolt {
+      width: 11px;
+      height: 15px;
+      fill: currentColor;
+    }
+
+    /* A panel over the page, not a column in the bar: the bar is 240px wide from the breakpoint up,
+       and a list of builds is wider than that. It overhangs the content, which is what a popover is
+       for, and it is anchored to the button's right edge so it never leaves the viewport. */
+    .qits-layout-builds-panel {
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      z-index: 20;
+      width: max-content;
+      min-width: 220px;
+      max-width: min(340px, 88vw);
+      max-height: 60vh;
+      overflow-y: auto;
+      padding: 4px;
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgb(17 24 39 / 12%);
+    }
+    .qits-layout-builds-note {
+      margin: 0;
+      padding: 6px 8px;
+      font-size: 13px;
+      color: #6b7280;
+    }
+    .qits-layout-builds-error {
+      color: #b91c1c;
+    }
+    .qits-layout-builds-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    /* Two lines' worth of facts on one row: what is being built and how far it has got above, where
+       from and by which pipeline below, quieter. */
+    .qits-layout-build {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 2px 8px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      border-left: 2px solid transparent;
+      font-size: 13px;
+    }
+    /* A run under way is the one that will change while the panel is open, so it carries the rail
+       as well as the badge's tone — colour alone would be the only thing telling the two apart. */
+    .qits-layout-build-running {
+      background: #f9fafb;
+      border-left-color: #1d4ed8;
+    }
+    .qits-layout-build-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 600;
+      color: #111827;
+    }
+    .qits-layout-build-branch,
+    .qits-layout-build-config {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 12px;
+      color: #6b7280;
+    }
+    .qits-layout-build-config {
+      text-align: right;
     }
 
     .qits-layout-nav {
@@ -518,6 +705,17 @@ export class QitsMainLayout {
   private readonly repositories = inject(QITS_REPOSITORIES, { optional: true });
 
   /**
+   * The fourth read, and the only one that is not about where the reader is: what qits-ci has in
+   * hand right now. Optional like the others, and *asked for* rather than assumed — an application
+   * that provides nothing has no bolt in its bar, exactly as one that provides no projects has no
+   * picker. A platform where `/ci` is not routed is then a decision at bootstrap rather than a
+   * broken affordance in every chrome.
+   */
+  private readonly builds = inject(QITS_BUILDS, { optional: true });
+
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+
+  /**
    * Whether the slot is the picker rather than the wordmark. Read once, not computed: an app either
    * wired the picker up at bootstrap or it did not, and the slot must not swap under a reader.
    *
@@ -526,6 +724,9 @@ export class QitsMainLayout {
    * which is worse than the brand text it would have replaced.
    */
   protected readonly hasPicker = this.projects !== null && this.scopeSource !== null;
+
+  /** Whether the bar carries the pending-builds bolt. Read once, for the reason the picker is. */
+  protected readonly hasBuilds = this.builds !== null;
 
   /**
    * Which link is *this* application in the flat shape. Read once from the document's base URI
@@ -631,6 +832,66 @@ export class QitsMainLayout {
    * project that no longer exists lands on the choices instead of a pill with no label.
    */
   protected readonly projectSlug = computed(() => this.scope().project);
+
+  /**
+   * Whether the pending-builds panel is open — and, with it, whether anything is being asked for.
+   * The source polls only while somebody is looking, so this signal is the whole cost model of the
+   * affordance: closed, the chrome makes no request at all.
+   */
+  protected readonly buildsOpen = signal(false);
+
+  /** Nothing has answered since the panel opened. */
+  protected readonly buildsPending = computed(
+    () => this.builds?.runs() === undefined && !this.buildsFailed(),
+  );
+
+  /** The read failed — said in one quiet line, because the rest of the page is unaffected. */
+  protected readonly buildsFailed = computed(() => this.builds?.failed() ?? false);
+
+  /**
+   * The panel's rows. The pipeline's *file name* is what is shown: every run on this platform
+   * carries the same `.config/qits/` in front of it, and the name is the part that differs.
+   */
+  protected readonly buildRows = computed<readonly QitsBuildRow[]>(() =>
+    (this.builds?.runs() ?? []).map((run) => ({
+      id: run.id,
+      repoName: run.repoName,
+      branch: run.branch,
+      status: run.status,
+      config: buildConfigName(run.configPath),
+      running: run.status === QITS_BUILD_RUNNING,
+    })),
+  );
+
+  protected toggleBuilds(): void {
+    this.setBuildsOpen(!this.buildsOpen());
+  }
+
+  /**
+   * A click anywhere but inside this affordance closes it. The test is the wrapper rather than the
+   * panel, so the button's own click — which has already toggled by the time this runs — is not
+   * read as an outside one and does not close what it just opened.
+   */
+  protected onDocumentClick(event: Event): void {
+    if (!this.buildsOpen()) return;
+    if ((event.target as Element | null)?.closest('.qits-layout-builds')) return;
+    this.setBuildsOpen(false);
+  }
+
+  /** Escape closes the panel and hands the focus back to the button that opened it. */
+  protected onEscape(): void {
+    if (!this.buildsOpen()) return;
+    this.setBuildsOpen(false);
+    this.host.nativeElement
+      .querySelector<HTMLElement>('.qits-layout-builds-toggle')
+      ?.focus({ preventScroll: true });
+  }
+
+  /** One place where the panel's state and the source's polling are said in the same breath. */
+  private setBuildsOpen(open: boolean): void {
+    this.buildsOpen.set(open);
+    this.builds?.watch(open);
+  }
 
   protected onProject(projectSlug: string | undefined): void {
     this.scopeSource?.select(projectSlug);
