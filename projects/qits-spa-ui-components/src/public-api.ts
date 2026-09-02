@@ -25,6 +25,16 @@ export type {
   QitsNavSlot,
   QitsNavTree,
 } from './lib/navigation';
+export {
+  provideQitsBuilds,
+  provideQitsBuildList,
+  QITS_BUILDS,
+  QITS_BUILDS_INTERVAL_MS,
+  QITS_BUILDS_URL,
+  QITS_BUILD_RUNNING,
+  toBuilds,
+} from './lib/builds';
+export type { QitsBuild, QitsBuildRuns, QitsBuildsSource } from './lib/builds';
 export { QitsNavSubmenu, QitsNavSubmenuSlot } from './lib/nav-submenu';
 export {
   provideQitsProjects,

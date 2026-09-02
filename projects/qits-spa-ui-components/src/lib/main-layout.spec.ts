@@ -4,6 +4,7 @@ import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
 
 import { QITS_BROWSER_ORIGIN } from './app-links';
+import { QITS_BUILDS, type QitsBuild, type QitsBuildsSource } from './builds';
 import { QitsMainLayout } from './main-layout';
 import { QitsNavSubmenuSlot } from './nav-submenu';
 import {
@@ -1059,6 +1060,194 @@ describe('QitsMainLayout', () => {
       await settle(fixture);
 
       expect(burger(fixture).getAttribute('aria-expanded')).toBe('false');
+    });
+  });
+
+  /**
+   * The pending-builds bolt. Not "does the source poll" — that is `provideQitsBuilds`' own spec —
+   * but what the bar decides: whether the affordance is there at all, that opening it is what starts
+   * the asking, that the two statuses are told apart by more than a colour, and that each of the
+   * three answers a reader can get is drawn as itself.
+   */
+  describe('the pending builds bolt', () => {
+    const RUNS: readonly QitsBuild[] = [
+      {
+        id: 'run-1',
+        repoName: 'qits-ci-service',
+        branch: 'main',
+        status: 'RUNNING',
+        configPath: '.config/qits/ci-post-receive.yml',
+        commitSha: '18f7422',
+      },
+      {
+        id: 'run-2',
+        repoName: 'qits-eventstream-javalib',
+        branch: 'feature/split',
+        status: 'QUEUED',
+        configPath: '.config/qits/ci-event-release.yml',
+      },
+    ];
+
+    /** What the panel said it was watching, in the order it said it — the source's whole contract. */
+    let watched: boolean[];
+
+    /**
+     * `runs` is passed through as given — `undefined` is the source's "nothing has answered yet"
+     * and a meaningful argument here, so it deliberately has no default to fall back to.
+     */
+    function renderBuilds(
+      runs: readonly QitsBuild[] | undefined,
+      options?: { readonly failed?: boolean },
+    ): ComponentFixture<QitsMainLayout> {
+      watched = [];
+      const source: QitsBuildsSource = {
+        runs: signal<readonly QitsBuild[] | undefined>(runs),
+        failed: signal(options?.failed ?? false),
+        watch: (watching: boolean) => watched.push(watching),
+      };
+      TestBed.configureTestingModule({
+        providers: [
+          provideRouter([]),
+          provideQitsNavigationLinks(PLATFORM),
+          { provide: QITS_BUILDS, useValue: source },
+        ],
+      });
+      const fixture = TestBed.createComponent(QitsMainLayout);
+      fixture.detectChanges();
+      return fixture;
+    }
+
+    function bolt(fixture: ComponentFixture<unknown>): HTMLButtonElement {
+      return fixture.nativeElement.querySelector('.qits-layout-builds-toggle') as HTMLButtonElement;
+    }
+
+    function panel(fixture: ComponentFixture<unknown>): HTMLElement | null {
+      return fixture.nativeElement.querySelector('.qits-layout-builds-panel') as HTMLElement | null;
+    }
+
+    function rows(fixture: ComponentFixture<unknown>): HTMLElement[] {
+      return [...fixture.nativeElement.querySelectorAll('.qits-layout-build')] as HTMLElement[];
+    }
+
+    function open(fixture: ComponentFixture<unknown>): void {
+      bolt(fixture).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      fixture.detectChanges();
+    }
+
+    it('is absent from an application that provides no builds source', () => {
+      const fixture = render();
+      expect(fixture.nativeElement.querySelector('.qits-layout-builds')).toBeNull();
+    });
+
+    it('starts closed, says so, and names itself for a reader who cannot see a bolt', () => {
+      const fixture = renderBuilds(RUNS);
+      expect(bolt(fixture).getAttribute('aria-label')).toBe('Pending builds');
+      expect(bolt(fixture).getAttribute('aria-expanded')).toBe('false');
+      expect(bolt(fixture).getAttribute('aria-controls')).toBe('qits-layout-builds-panel');
+      expect(panel(fixture)).toBeNull();
+      // Closed is not merely empty: nothing has been asked for yet either.
+      expect(watched).toEqual([]);
+    });
+
+    it('toggles the panel both ways, and starts and stops the asking with it', () => {
+      const fixture = renderBuilds(RUNS);
+
+      open(fixture);
+      expect(bolt(fixture).getAttribute('aria-expanded')).toBe('true');
+      expect(panel(fixture)?.id).toBe('qits-layout-builds-panel');
+      expect(watched).toEqual([true]);
+
+      open(fixture);
+      expect(bolt(fixture).getAttribute('aria-expanded')).toBe('false');
+      expect(panel(fixture)).toBeNull();
+      expect(watched).toEqual([true, false]);
+    });
+
+    it('lists a run by repository, branch, status and the pipeline file it runs', () => {
+      const fixture = renderBuilds(RUNS);
+      open(fixture);
+
+      const first = rows(fixture)[0];
+      expect(first.querySelector('.qits-layout-build-name')?.textContent?.trim()).toBe(
+        'qits-ci-service',
+      );
+      expect(first.querySelector('.qits-layout-build-branch')?.textContent?.trim()).toBe('main');
+      // The file, not the path: every run on this platform shares the directories in front of it.
+      expect(first.querySelector('.qits-layout-build-config')?.textContent?.trim()).toBe(
+        'ci-post-receive.yml',
+      );
+    });
+
+    /** Colour alone would be the only thing telling the two apart, so the running row has a rail. */
+    it('draws a run under way apart from one waiting for a worker', () => {
+      const fixture = renderBuilds(RUNS);
+      open(fixture);
+      const [running, queued] = rows(fixture);
+
+      expect(running.querySelector('.qits-badge')?.textContent?.trim()).toBe('RUNNING');
+      expect(running.querySelector('.qits-badge-info')).not.toBeNull();
+      expect(running.classList).toContain('qits-layout-build-running');
+
+      expect(queued.querySelector('.qits-badge')?.textContent?.trim()).toBe('QUEUED');
+      expect(queued.querySelector('.qits-badge-neutral')).not.toBeNull();
+      expect(queued.classList).not.toContain('qits-layout-build-running');
+    });
+
+    it('says nothing is building rather than showing an empty box', () => {
+      const fixture = renderBuilds([]);
+      open(fixture);
+      expect(rows(fixture)).toEqual([]);
+      expect(panel(fixture)?.textContent?.trim()).toBe('Nothing building.');
+    });
+
+    it('says it is checking while nothing has answered yet', () => {
+      const fixture = renderBuilds(undefined);
+      open(fixture);
+      expect(panel(fixture)?.textContent?.trim()).toBe('Checking…');
+    });
+
+    /**
+     * A host where `/ci` is not routed at all is the ordinary case for this line, so it has to be
+     * one quiet sentence inside the panel — the bar, the sidebar and the content are untouched.
+     */
+    it('says the read failed in one line, and breaks nothing around it', () => {
+      const fixture = renderBuilds([], { failed: true });
+      open(fixture);
+
+      expect(panel(fixture)?.querySelector('.qits-layout-builds-error')?.textContent?.trim()).toBe(
+        'Builds unavailable.',
+      );
+      expect(rows(fixture)).toEqual([]);
+      expect(labels(fixture)).toEqual(['Home', 'CI', 'Docs']);
+      expect(fixture.nativeElement.querySelector('main.qits-layout-content')).not.toBeNull();
+    });
+
+    it('closes on a click outside itself, and stays open for one inside', () => {
+      const fixture = renderBuilds(RUNS);
+      open(fixture);
+
+      panel(fixture)?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      fixture.detectChanges();
+      expect(panel(fixture)).not.toBeNull();
+
+      document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      fixture.detectChanges();
+      expect(panel(fixture)).toBeNull();
+      expect(bolt(fixture).getAttribute('aria-expanded')).toBe('false');
+      expect(watched).toEqual([true, false]);
+    });
+
+    it('closes on Escape and hands the focus back to the bolt', () => {
+      const fixture = renderBuilds(RUNS);
+      open(fixture);
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      fixture.detectChanges();
+
+      expect(panel(fixture)).toBeNull();
+      expect(watched).toEqual([true, false]);
+      expect(fixture.nativeElement.contains(document.activeElement)).toBe(true);
+      expect(document.activeElement).toBe(bolt(fixture));
     });
   });
 });

@@ -12,13 +12,16 @@ serves is known to the edge and to nothing else; what a project holds is known t
 each SPA knows only itself. So the chrome makes three reads, and everything else in this package
 still takes what it renders as an input.
 
+A fourth read hangs off the same rule and is opt-in: the pending-builds bolt asks qits-ci what it is
+building, and only while a reader is looking at the answer.
+
 | Component        | Selector             | What it is                                                                                                                                                                                                                      |
 | ---------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `QitsButton`     | `<qits-button>`      | The button. `variant` (`primary`/`secondary`/`ghost`), `size` (`sm`/`md`/`lg`), `type`, `disabled`, `busy`; emits `pressed`.                                                                                                     |
 | `QitsBadge`      | `<qits-badge>`       | A short status word. Required `label`, semantic `tone` (`neutral`/`info`/`success`/`warning`/`danger`).                                                                                                                          |
 | `QitsCard`       | `<qits-card>`        | A titled surface. `heading`, `subheading`, `elevated`; projects into the body, and `[qitsCardActions]` into the header.                                                                                                          |
 | `QitsPicker`     | `<qits-picker>`      | Pick one of a list. Required `options` (`{ value: T, label: string }[]`), two-way `value` of `T \| undefined`; `compareWith`, `placeholder`, `disabled`.                                                                         |
-| `QitsMainLayout` | `<qits-main-layout>` | The application skeleton: the project picker, the nested sidebar, and the `<router-outlet />` the app's child routes render into. `brand` is the top-left fallback; `links` an override in the flat shape.                        |
+| `QitsMainLayout` | `<qits-main-layout>` | The application skeleton: the project picker, the pending-builds bolt beside it, the nested sidebar, and the `<router-outlet />` the app's child routes render into. `brand` is the top-left fallback; `links` an override in the flat shape. |
 | `QitsNavSubmenu` | `[qitsNavSubmenu]`   | Marks an `<ng-template>` as the sub-menu under the current navigation row. The layout gives it a box; the app styles what goes in it.                                                                                            |
 
 `busy` is separate from `disabled` on purpose: both stop a press, but only `busy` sets
@@ -298,6 +301,56 @@ nothing inside it, and the content keeps the shell's style scope, because view e
 follows where a node is declared rather than where it is inserted. Where no row is this application
 — the platform does not serve it yet, a bare `ng serve` — the sub-menu goes to the foot of the
 navigation instead of nowhere.
+
+### The pending-builds bolt
+
+Beside the picker, a lightning bolt: what qits-ci has in hand right now, from any page of any
+application. `provideQitsBuilds()` is what puts it there — no provider, no bolt, exactly as no
+project source means no picker.
+
+```ts
+bootstrapApplication(App, {
+  providers: [provideHttpClient(), provideRouter(routes), provideQitsBuilds()],
+});
+```
+
+```json
+{
+  "runs": [
+    {
+      "id": "…",
+      "repoName": "qits-ci-service",
+      "branch": "main",
+      "status": "RUNNING",
+      "configPath": ".config/qits/ci-post-receive.yml",
+      "commitSha": "18f7422"
+    }
+  ]
+}
+```
+
+`GET /ci/api/runs/active`, a **same-origin path** like the chrome's other reads and for the same
+reason: the edge routes `/ci` on every vhost, so the browser's own session reaches qits-ci with no
+machine token, no CORS pre-flight and no origin compiled in here.
+
+The panel is the whole cost model. Nothing is asked while it is closed; opening it reads once and
+again every five seconds; closing it stops the timer, cancels a read in flight and **forgets the
+answer**, because a queue from an hour ago painted as now is worse than a pending state that
+resolves in a moment. It closes on Escape — handing the focus back to the bolt — and on a click
+outside itself.
+
+Each row is four facts: the repository, the status, the branch, and the pipeline file's **name**
+(`ci-post-receive.yml`), since every run on this platform shares the directories in front of it. A
+`RUNNING` run carries the info tone and a rail down its left; anything else is neutral, so the two
+are told apart by more than a colour. The status word is whatever qits-ci said, upper-cased and
+never narrowed: a state this library does not know is still a pending build.
+
+An empty queue says "Nothing building.", a read still in flight "Checking…", and a `/ci` that could
+not be reached one quiet line — "Builds unavailable." — inside the panel. That last one is the
+ordinary case on a host where the edge routes no `/ci` at all, and it is why the failure is a
+sentence in a popover rather than anything the layout around it notices.
+`provideQitsBuildList([…])` answers the same contract from a literal, with nothing fetched and
+nothing polled.
 
 ## Install
 

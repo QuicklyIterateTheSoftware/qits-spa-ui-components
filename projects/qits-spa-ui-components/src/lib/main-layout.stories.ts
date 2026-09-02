@@ -10,6 +10,7 @@ import {
 
 import { QITS_BROWSER_ORIGIN } from './app-links';
 import { QitsBadge } from './badge';
+import { provideQitsBuildList, QITS_BUILDS, type QitsBuild } from './builds';
 import { QitsCard } from './card';
 import { QitsMainLayout } from './main-layout';
 import { QitsNavSubmenu } from './nav-submenu';
@@ -169,6 +170,32 @@ const DEMO_REPOSITORIES: readonly QitsRepository[] = [
   { id: 'r5', name: 'qits-eventstream', category: 'libs' },
 ];
 
+/** What qits-ci has in hand: one build under way, two waiting for a worker. */
+const DEMO_BUILDS: readonly QitsBuild[] = [
+  {
+    id: 'run-1',
+    repoName: 'qits-ci-service',
+    branch: 'main',
+    status: 'RUNNING',
+    configPath: '.config/qits/ci-post-receive.yml',
+    commitSha: '18f7422',
+  },
+  {
+    id: 'run-2',
+    repoName: 'qits-eventstream-javalib',
+    branch: 'feature/bus-split',
+    status: 'QUEUED',
+    configPath: '.config/qits/ci-post-receive.yml',
+  },
+  {
+    id: 'run-3',
+    repoName: 'qits-spa-ui-components',
+    branch: 'main',
+    status: 'QUEUED',
+    configPath: '.config/qits/ci-event-release.yml',
+  },
+];
+
 /**
  * The workbench is served from `/iframe.html`, so the address says nothing about a project. A
  * literal scope stands in for the one an application reads out of its own URL.
@@ -217,6 +244,15 @@ const meta: Meta<QitsMainLayout> = {
 
 export default meta;
 type Story = StoryObj<QitsMainLayout>;
+
+/**
+ * The builds popover is closed until someone opens it — that is the point of it — so the stories
+ * about what is *inside* it open it themselves. `canvasElement` is the story's own root, which is
+ * what keeps this from finding the bolt of a neighbouring story in the docs page.
+ */
+async function openTheBolt({ canvasElement }: { canvasElement: HTMLElement }): Promise<void> {
+  canvasElement.querySelector<HTMLButtonElement>('.qits-layout-builds-toggle')?.click();
+}
 
 /** No project in scope: the groups that are about one have nothing to say, so only SYSTEM shows. */
 export const Default: Story = {};
@@ -380,6 +416,55 @@ export const ProjectsLoading: Story = {
 export const ProjectsUnavailable: Story = {
   name: 'Projects unavailable',
   decorators: [applicationConfig({ providers: [provideQitsProjectList([], { failed: true })] })],
+};
+
+/**
+ * The pending-builds bolt, beside the picker: what qits-ci has in hand, one click away from every
+ * page of every application. A run under way carries the info tone and a rail down its left; one
+ * waiting for a worker is neutral, so the two are told apart by more than a colour.
+ *
+ * The panel is opened here by the story, because a closed popover documents nothing. In an
+ * application it opens on the bolt, closes on Escape or a click outside, and asks qits-ci only
+ * while it is open — `provideQitsBuilds()` is what puts it in the bar at all.
+ */
+export const WithPendingBuilds: Story = {
+  name: 'With pending builds',
+  decorators: [applicationConfig({ providers: [provideQitsBuildList(DEMO_BUILDS)] })],
+  play: openTheBolt,
+};
+
+/** The queue is empty and the platform is idle — said in words, not as an empty box. */
+export const NoPendingBuilds: Story = {
+  name: 'No pending builds',
+  decorators: [applicationConfig({ providers: [provideQitsBuildList([])] })],
+  play: openTheBolt,
+};
+
+/**
+ * `/ci` could not be reached — the ordinary case on a host the platform does not route it on. One
+ * quiet line inside the panel, and nothing around it changes: that is the whole failure mode of a
+ * header affordance that reads another application.
+ */
+export const BuildsUnavailable: Story = {
+  name: 'Builds unavailable',
+  decorators: [applicationConfig({ providers: [provideQitsBuildList([], { failed: true })] })],
+  play: openTheBolt,
+};
+
+/** Nothing has answered since the panel opened — the first paint of every open of the popover. */
+export const BuildsLoading: Story = {
+  name: 'Builds loading',
+  decorators: [
+    applicationConfig({
+      providers: [
+        {
+          provide: QITS_BUILDS,
+          useValue: { runs: signal(undefined), failed: signal(false), watch: () => undefined },
+        },
+      ],
+    }),
+  ],
+  play: openTheBolt,
 };
 
 /**
