@@ -320,9 +320,9 @@ bootstrapApplication(App, {
     {
       "id": "…",
       "repoName": "qits-ci-service",
-      "branch": "main",
+      "branch": "release/7f3c2a",
       "status": "RUNNING",
-      "configPath": ".config/qits/ci-post-receive.yml",
+      "configPath": ".config/qits/ci-event-release-request.yml",
       "commitSha": "18f7422"
     }
   ]
@@ -340,7 +340,8 @@ resolves in a moment. It closes on Escape — handing the focus back to the bolt
 outside itself.
 
 Each row is four facts: the repository, the status, the branch, and the pipeline file's **name**
-(`ci-post-receive.yml`), since every run on this platform shares the directories in front of it. A
+(`ci-event-release-request.yml`), since every run on this platform shares the directories in front of
+it. A
 `RUNNING` run carries the info tone and a rail down its left; anything else is neutral, so the two
 are told apart by more than a colour. The status word is whatever qits-ci said, upper-cased and
 never narrowed: a state this library does not know is still a pending build.
@@ -367,16 +368,25 @@ services since the byte-plane split: the cache is `qits-platform-mirror` on 8082
 is `qits-artifacts` on 8081. Inside qits-net — a CI step, another container — the same two roots
 are `http://qits-platform-mirror:8080/artifacts/npm/npmjs/` and
 `http://qits-artifacts:8080/artifacts/npm/npm/`, and CI writes them from environment rather than
-reading any file (see `.config/qits/ci-post-receive.yml`). Neither registry wants a credential.
+reading any file (see `.config/qits/ci-event-release-request.yml`). Neither registry wants a
+credential.
 
 The published package is the **prebuilt ng-packagr output** — FESM bundles and type definitions, in
 Angular's partial compilation format. There is nothing to compile on install and no `prepare` hook;
 consumers install a tarball like any other dependency.
 
-### Pinning a `main` build takes an exact version, never a caret
+### There is no `main` build to pin any more
 
-A build off `main` is published as `<last released version>-main.g<sha7>` (see _Releasing_), and a
-consumer reaching for one ahead of its release must spell it **exactly**:
+**Consumers depend on released CalVers, `^<version>`, and nothing else.** The `main` dist-tag is
+frozen where the last push pipeline left it. Prereleases named `<last released version>-main.g<sha7>`
+were cut on every push to `main`; there are no pushes to `main` to hang that leg off now that a
+commit is proved on the fold of a release request, so the leg was dropped rather than repointed.
+Anything still resolving `@qits/ui-components@main` is pinned to a build from before the cutover
+and has to move to a released version.
+
+Getting ahead of a release is no longer a pin at all: name your branch in a release request, let the
+fold gate it, and install the CalVer that comes out. If you do reach for an old prerelease that is
+still in the registry, spell it **exactly** — the caret is a trap:
 
     "@qits/ui-components": "2026.806.184725-main.gc03ad30"     # yes
     "@qits/ui-components": "^2026.806.184725-main.gc03ad30"    # no
@@ -386,12 +396,9 @@ named after, so npm resolves the release and never mentions the prerelease again
 the build the caller was trying to get ahead of, and the failure lands somewhere else entirely:
 `error TS2305: Module '@qits/ui-components' has no exported member 'QitsPicker'`.
 
-The trap is quiet because the caret usually works. It did for the first client to pin a `main`
+The trap was quiet because the caret usually worked. It did for the first client to pin a `main`
 build — but only because no stable release of that version existed yet for the range to prefer.
 The moment one did, every caret pin silently moved backwards.
-
-A pin like this is temporary by nature. Once the release lands, the range goes back to an ordinary
-`^<version>`, and the maintenance-hop pipelines described in _Releasing_ write exactly that.
 
 Then, in a standalone component:
 
@@ -456,32 +463,47 @@ That is why the doc comments in `src/lib` are worth keeping accurate: they are t
 
 `pnpm build-storybook` runs in the pipeline too. It ships nothing — `storybook-static/` is
 gitignored and dies with the container — but it compiles every story, the `.storybook` config and
-the compodoc pass, so a broken workbench surfaces on push rather than the next time someone opens
-it. Like the build it is Vite compiling, not a browser rendering, so the browserless CI image is
+the compodoc pass, so a broken workbench surfaces at the QA gate rather than the next time someone
+opens it. Like the build it is Vite compiling, not a browser rendering, so the browserless CI image is
 enough.
 
 ## Releasing
 
-The version in `projects/qits-spa-ui-components/package.json` is stamped by the release door — the
+The version in `projects/qits-spa-ui-components/package.json` is stamped by Auto Release — the
 CalVer that names the release commit and the tag — and never edited by hand. The release pipeline
 below stops when the built manifest and the tag disagree, so a hand-picked number is a red release
 rather than a version. A breaking change is therefore not a different kind of number: it is the next
 CalVer, and what consumers need is the note in _Pinning_ above.
 
-Two pipelines publish, and they publish different things.
+**A release starts as a release REQUEST**, opened against this repository in qits-projects:
 
-`.config/qits/ci-post-receive.yml` runs on every push to `main`. It installs, lints, tests, builds
-and publishes `<last released version>-main.g<sha7>` under the **`main`** dist-tag — a build of the
-branch, named so nobody mistakes it for a release. The explicit `--tag main` is load-bearing: a bare
-`npm publish` would move `latest` to a prerelease.
+```
+POST /projects/api/repositories/<repoId>/release-requests
+{ "branch": "<your branch>", "summary": "<the release's subject>" }
+```
 
-`.config/qits/ci-event-release.yml` is the release pipeline. It reacts to this repository's own
-release **tag** (`SCMPublishTag`), checks that tag out, builds it and publishes the real version
-under `latest`. Both publish **if absent** — published versions are immutable and an event can be
-redelivered, so a second run of one release goes green rather than fighting the registry.
+qits-projects folds `main`, that branch and any released tags still in flight onto a backing branch
+`release/<id>`, re-folding whenever the set changes. Nothing merges and nothing is released at that
+call.
 
-The tag is the trigger because it is the durable stamp: a bootstrap replay restores this release by
-pushing the tag alone, and the pipeline re-derives the tarball from it.
+Two pipelines run here, and they run at different moments.
+
+`.config/qits/ci-event-release-request.yml` is the **QA** pipeline. It reacts to the fold — install,
+lint, `pnpm test`, `pnpm build`, `pnpm build-storybook` — and every step is gating, because a fold
+publishes nothing. Its verdict is the quality gate: Auto Release stamps the CalVer, bumps the
+manifest, tags and publishes `SCMRelease` only over a green one, and `main` is finalized only after
+the release has deployed. There is no push pipeline any more; a commit is proved on the fold it is
+released from rather than on the branch it landed on.
+
+`.config/qits/ci-event-release.yml` is the release pipeline. It reacts to `SCMRelease`, checks the
+release tag out, builds it and publishes the real version under `latest`. It publishes **if
+absent** — published versions are immutable and an event can be redelivered, so a second run of one
+release goes green rather than fighting the registry.
+
+The tag is still the durable stamp, but it no longer triggers: qits-githost's tag primitive
+announces nothing, so a bootstrap replay restores this release by pushing the tag quietly and
+re-presenting the `SCMRelease` through qits-ci's manual trigger door, which runs the same pipeline
+and re-derives the tarball from the tag.
 
 The release train runs through this library. A real release also publishes `SCMRelease`, which says
 only that source control has the version; `SoftwareRelease` is what qits-ci publishes where a green
