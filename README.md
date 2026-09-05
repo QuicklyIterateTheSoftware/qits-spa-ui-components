@@ -375,18 +375,27 @@ The published package is the **prebuilt ng-packagr output** — FESM bundles and
 Angular's partial compilation format. There is nothing to compile on install and no `prepare` hook;
 consumers install a tarball like any other dependency.
 
-### There is no `main` build to pin any more
+### `main` is the latest released main
 
-**Consumers depend on released CalVers, `^<version>`, and nothing else.** The `main` dist-tag is
-frozen where the last push pipeline left it. Prereleases named `<last released version>-main.g<sha7>`
-were cut on every push to `main`; there are no pushes to `main` to hang that leg off now that a
-commit is proved on the fold of a release request, so the leg was dropped rather than repointed.
-Anything still resolving `@qits/ui-components@main` is pinned to a build from before the cutover
-and has to move to a released version.
+**`@qits/ui-components@main` names the newest released version**, and the release pipeline puts it
+there with `npm dist-tag add` immediately after its publish. It is a separate call rather than a
+publish flag because `npm publish` can claim exactly one dist-tag and a published version is
+immutable — no single publish is under both `latest` and `main`.
 
-Getting ahead of a release is no longer a pin at all: name your branch in a release request, let the
-fold gate it, and install the CalVer that comes out. If you do reach for an old prerelease that is
-still in the registry, spell it **exactly** — the caret is a trap:
+The tag used to mean something else: prereleases named `<last released version>-main.g<sha7>`, cut on
+every push to `main`. There are no pushes to `main` to hang that leg off now that a commit is proved
+on the fold of a release request, so the leg went — and with it the only thing that ever wrote this
+tag, which is why `main` sat on `2026.902.204627-main.geec9f2c` while releases kept moving `latest`.
+Main only advances at a release under this flow, so the tag was repointed at releases rather than
+left frozen.
+
+**Pinning `^<version>` is still the ordinary thing to do.** `@main` says "follow this repository's
+released mains" and `latest` says "follow whatever the registry's ordering rule allows"; today they
+name the same version, and the difference is what each one promises to keep meaning.
+
+Getting ahead of a release is not a pin at all: name your branch in a release request, let the fold
+gate it, and install the CalVer that comes out. If you do reach for an old prerelease that is still
+in the registry, spell it **exactly** — the caret is a trap:
 
     "@qits/ui-components": "2026.806.184725-main.gc03ad30"     # yes
     "@qits/ui-components": "^2026.806.184725-main.gc03ad30"    # no
