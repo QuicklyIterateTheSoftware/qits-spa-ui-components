@@ -505,9 +505,16 @@ the release has deployed. There is no push pipeline any more; a commit is proved
 released from rather than on the branch it landed on.
 
 `.config/qits/ci-event-release.yml` is the release pipeline. It reacts to `SCMRelease`, checks the
-release tag out, builds it and publishes the real version under `latest`. It publishes **if
-absent** — published versions are immutable and an event can be redelivered, so a second run of one
-release goes green rather than fighting the registry.
+release tag out, builds it and publishes the real version under `latest`, then points `main` at that
+same version with `npm dist-tag add`. It publishes **if absent** — published versions are immutable
+and an event can be redelivered, so a second run of one release goes green rather than fighting the
+registry — while the tag move is unconditional, so a redelivery repairs a tag the first run did not
+manage to set.
+
+**An edit to this file takes effect on the release that merges it**, not the one after. qits-ci
+selects the recipe at `main`, and Auto Release merges the fold before it publishes the `SCMRelease`
+that triggers the run, so `main` already carries the edit. The QA pipeline above is the one read at
+the pre-merge `main`; do not carry that intuition across.
 
 The tag is still the durable stamp, but it no longer triggers: qits-githost's tag primitive
 announces nothing, so a bootstrap replay restores this release by pushing the tag quietly and
